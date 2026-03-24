@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "grafana-ai-agent.backendName" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "grafana-ai-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+data:
+  APP_NAME: {{ .Values.backend.config.appName | quote }}
+  LOG_LEVEL: {{ .Values.backend.config.logLevel | quote }}
+  DEBUG: {{ .Values.backend.config.debug | quote }}
+  OLLAMA_BASE_URL: {{ .Values.backend.config.ollamaBaseUrl | quote }}
+  OLLAMA_MODEL: {{ .Values.backend.config.ollamaModel | quote }}
+  OLLAMA_TIMEOUT: {{ .Values.backend.config.ollamaTimeout | quote }}
+  GRAFANA_BASE_URL: {{ .Values.backend.config.grafanaBaseUrl | quote }}
+  LOKI_BASE_URL: {{ .Values.backend.config.lokiBaseUrl | quote }}
+  PROMETHEUS_BASE_URL: {{ .Values.backend.config.prometheusBaseUrl | quote }}
+  TEMPO_BASE_URL: {{ .Values.backend.config.tempoBaseUrl | quote }}
+  CORS_ORIGINS: {{ .Values.backend.config.corsOrigins | quote }}

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "grafana-ai-agent.frontendName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "grafana-ai-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: {{ .Values.service.frontend.type }}
+  selector:
+    {{- include "grafana-ai-agent.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  ports:
+    - name: http
+      port: {{ .Values.service.frontend.port }}
+      targetPort: http
+      protocol: TCP

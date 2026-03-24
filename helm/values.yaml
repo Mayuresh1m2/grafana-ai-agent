@@ -1,0 +1,99 @@
+# ── Replica counts ─────────────────────────────────────────────────────────────
+replicaCount:
+  backend: 2
+  frontend: 2
+
+# ── Container images ───────────────────────────────────────────────────────────
+image:
+  backend:
+    repository: ghcr.io/your-org/grafana-ai-agent-backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/your-org/grafana-ai-agent-frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# ── Services ───────────────────────────────────────────────────────────────────
+service:
+  backend:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+  frontend:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+
+# ── Ingress ────────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: grafana-ai-agent.local
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+  tls: []
+  # tls:
+  #   - secretName: grafana-ai-agent-tls
+  #     hosts:
+  #       - grafana-ai-agent.local
+
+# ── Backend application config ─────────────────────────────────────────────────
+backend:
+  config:
+    appName: grafana-ai-agent
+    logLevel: INFO
+    debug: "false"
+    ollamaBaseUrl: "http://host.docker.internal:11434"
+    ollamaModel: llama3
+    ollamaTimeout: "120.0"
+    grafanaBaseUrl: "http://grafana.monitoring.svc.cluster.local:3000"
+    lokiBaseUrl: "http://loki.monitoring.svc.cluster.local:3100"
+    prometheusBaseUrl: "http://prometheus.monitoring.svc.cluster.local:9090"
+    tempoBaseUrl: "http://tempo.monitoring.svc.cluster.local:3200"
+    corsOrigins: '["http://localhost:5173","https://grafana-ai-agent.local"]'
+  secrets:
+    # Override in a separate values-secret.yaml or via --set
+    grafanaApiKey: ""
+
+# ── Resource limits ────────────────────────────────────────────────────────────
+resources:
+  backend:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  frontend:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── Horizontal Pod Autoscaler ─────────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  backend:
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  frontend:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+# ── Pod disruption budget ──────────────────────────────────────────────────────
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}

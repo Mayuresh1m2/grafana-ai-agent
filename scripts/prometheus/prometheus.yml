@@ -1,0 +1,47 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: local
+    environment: dev
+
+# ── Alerting ──────────────────────────────────────────────────────────────────
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# ── Rule files ────────────────────────────────────────────────────────────────
+rule_files: []
+
+# ── Scrape configs ────────────────────────────────────────────────────────────
+scrape_configs:
+  # Prometheus itself
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Grafana AI Agent backend (running on host)
+  - job_name: grafana-ai-agent-backend
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Grafana
+  - job_name: grafana
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: /metrics
+
+  # Loki
+  - job_name: loki
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: /metrics
+
+  # Tempo
+  - job_name: tempo
+    static_configs:
+      - targets: ['tempo:3200']
+    metrics_path: /metrics
