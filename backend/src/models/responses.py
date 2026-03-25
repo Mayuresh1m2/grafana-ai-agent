@@ -36,3 +36,15 @@ class GrafanaConnectResponse(BaseModel):
     session_id: str
     grafana_url: str
     datasources: list[DatasourceInfo]
+
+
+class AlertInfo(BaseModel):
+    """A single active Grafana alert, normalised from either the Alertmanager v2
+    API or the legacy /api/alerts endpoint."""
+
+    name: str
+    severity: str = "unknown"   # critical | warning | info | unknown
+    state: str = "firing"       # firing | pending
+    summary: str = ""
+    labels: dict[str, str] = {}
+    started_at: str | None = None

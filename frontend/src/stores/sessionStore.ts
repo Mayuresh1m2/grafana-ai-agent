@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useLocalStorage } from '@/composables/useLocalStorage'
+import { fetchAlerts } from '@/api/session'
+import type { AlertInfo } from '@/api/session'
 import type { SetupStep, Environment, AuthStatus, SessionConfig } from '@/types/chat'
 
 export const useSessionStore = defineStore('session', () => {
@@ -18,6 +20,8 @@ export const useSessionStore = defineStore('session', () => {
   const authPollTimer     = ref<ReturnType<typeof setInterval> | null>(null)
   const connectivityOk    = ref<boolean | null>(null)
   const setupComplete     = ref(false)
+  const alerts            = ref<AlertInfo[]>([])
+  const alertsLoading     = ref(false)
 
   // ── Computed ─────────────────────────────────────────────────────────────
   const config = computed<SessionConfig>(() => ({
@@ -75,6 +79,18 @@ export const useSessionStore = defineStore('session', () => {
     stopAuthPoll()
   }
 
+  async function loadAlerts() {
+    if (!sessionId.value) return
+    alertsLoading.value = true
+    try {
+      alerts.value = await fetchAlerts(sessionId.value)
+    } catch {
+      alerts.value = []
+    } finally {
+      alertsLoading.value = false
+    }
+  }
+
   function addService(svc: string) {
     const trimmed = svc.trim()
     if (trimmed && !services.value.includes(trimmed)) {
@@ -89,11 +105,11 @@ export const useSessionStore = defineStore('session', () => {
   return {
     // state
     step, grafanaUrl, namespace, environment, services, repoPath, sessionId,
-    authStatus, connectivityOk, setupComplete,
+    authStatus, connectivityOk, setupComplete, alerts, alertsLoading,
     // computed
     config, isReady,
     // actions
     goToStep, startAuthPoll, stopAuthPoll,
-    confirmSetup, resetSetup, addService, removeService,
+    confirmSetup, resetSetup, addService, removeService, loadAlerts,
   }
 })

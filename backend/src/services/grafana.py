@@ -14,7 +14,7 @@ import httpx
 import structlog
 from fastapi import Depends, HTTPException
 
-from src.models.responses import DatasourceInfo
+from src.models.responses import AlertInfo, DatasourceInfo
 from src.services.session_store import GrafanaSession, SessionStore, get_session_store
 
 logger = structlog.get_logger(__name__)
@@ -206,6 +206,76 @@ class GrafanaClient:
         _raise_for_status(resp)
         result: dict[str, object] = resp.json()
         return result
+
+    # ── Active alerts ─────────────────────────────────────────────────────────
+
+    async def get_active_alerts(self) -> list[AlertInfo]:
+        """Return currently firing alerts.
+
+        Tries the Grafana Alertmanager v2 API first (unified alerting, v8+).
+        Falls back to the legacy ``/api/alerts`` endpoint for older instances.
+        Returns an empty list if neither succeeds — alerts are best-effort.
+        """
+        try:
+            resp = await self._http.get(
+                "/api/alertmanager/grafana/api/v2/alerts",
+                params={"active": "true", "silenced": "false", "inhibited": "false"},
+            )
+            if resp.status_code == 200:
+                return self._parse_alertmanager_v2(resp.json())
+        except Exception:
+            pass
+
+        try:
+            resp = await self._http.get("/api/alerts", params={"state": "alerting"})
+            if resp.status_code == 200:
+                return self._parse_legacy_alerts(resp.json())
+        except Exception:
+            pass
+
+        return []
+
+    @staticmethod
+    def _parse_alertmanager_v2(raw: list[dict[str, object]]) -> list[AlertInfo]:
+        alerts = []
+        for a in raw:
+            labels: dict[str, str] = {
+                str(k): str(v) for k, v in (a.get("labels") or {}).items()
+            }
+            annotations: dict[str, str] = {
+                str(k): str(v) for k, v in (a.get("annotations") or {}).items()
+            }
+            status = a.get("status") or {}
+            state = "firing" if (status.get("state") == "active") else "pending"
+            alerts.append(
+                AlertInfo(
+                    name=labels.get("alertname", "Unknown"),
+                    severity=labels.get("severity", "unknown").lower(),
+                    state=state,
+                    summary=annotations.get("summary", annotations.get("message", "")),
+                    labels=labels,
+                    started_at=str(a.get("startsAt") or ""),
+                )
+            )
+        return alerts
+
+    @staticmethod
+    def _parse_legacy_alerts(raw: list[dict[str, object]]) -> list[AlertInfo]:
+        alerts = []
+        for a in raw:
+            if a.get("state") not in ("alerting", "pending"):
+                continue
+            alerts.append(
+                AlertInfo(
+                    name=str(a.get("name", "Unknown")),
+                    severity="unknown",
+                    state="firing" if a.get("state") == "alerting" else "pending",
+                    summary=str(a.get("message", "")),
+                    labels={},
+                    started_at=str(a.get("newStateDate") or ""),
+                )
+            )
+        return alerts
 
     async def aclose(self) -> None:
         await self._http.aclose()

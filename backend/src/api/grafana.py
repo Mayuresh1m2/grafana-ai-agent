@@ -13,8 +13,9 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.models.requests import GrafanaConnectRequest, GrafanaRefreshRequest
-from src.models.responses import DatasourceInfo, GrafanaConnectResponse
+from src.models.responses import AlertInfo, DatasourceInfo, GrafanaConnectResponse
 from src.services.grafana_auth import GrafanaAuthError, GrafanaAuthService
+from src.services.grafana import GrafanaClient
 from src.services.session_store import GrafanaSession, SessionStore, get_session_store
 
 logger = structlog.get_logger(__name__)
@@ -186,3 +187,30 @@ async def list_datasources(
             detail=f"No active session for session_id='{session_id}'. Call POST /connect first.",
         )
     return session.datasources
+
+
+@router.get(
+    "/alerts",
+    response_model=list[AlertInfo],
+    summary="Return currently firing Grafana alerts",
+    description=(
+        "Tries the Alertmanager v2 API first (Grafana unified alerting, v8+), "
+        "then falls back to the legacy /api/alerts endpoint. "
+        "Returns an empty list rather than an error when neither is available."
+    ),
+)
+async def get_alerts(
+    session_id: str,
+    store: Annotated[SessionStore, Depends(get_session_store)],
+) -> list[AlertInfo]:
+    session = await store.get(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=401,
+            detail=f"No active session for session_id='{session_id}'. Call POST /connect first.",
+        )
+    client = GrafanaClient(session)
+    try:
+        return await client.get_active_alerts()
+    finally:
+        await client.aclose()

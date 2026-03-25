@@ -16,6 +16,15 @@ export interface DatasourceInfo {
   is_default: boolean
 }
 
+export interface AlertInfo {
+  name: string
+  severity: 'critical' | 'warning' | 'info' | 'unknown'
+  state: string
+  summary: string
+  labels: Record<string, string>
+  started_at: string | null
+}
+
 export interface GrafanaConnectResult {
   session_id: string
   grafana_url: string
@@ -75,6 +84,12 @@ export async function refreshGrafanaCookie(
     const detail = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
     throw new Error(typeof detail.detail === 'string' ? detail.detail : `HTTP ${res.status}`)
   }
+  return res.json()
+}
+
+export async function fetchAlerts(sessionId: string): Promise<AlertInfo[]> {
+  const res = await fetch(`/api/v1/grafana/alerts?session_id=${encodeURIComponent(sessionId)}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
 

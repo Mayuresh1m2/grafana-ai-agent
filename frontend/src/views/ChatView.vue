@@ -15,19 +15,34 @@ const chat    = useChatStore()
 
 const scrollEl = ref<HTMLElement | null>(null)
 
-// Guard: redirect to setup if not ready
+// Guard: redirect to setup if not ready; then fetch active alerts
 onMounted(() => {
-  if (!session.setupComplete) router.replace('/setup')
+  if (!session.setupComplete) { router.replace('/setup'); return }
+  session.loadAlerts()
 })
+
+function alertsContext(): string {
+  if (session.alertsLoading) return 'Loading active alerts…'
+  if (!session.alerts.length) return 'No active alerts'
+  return session.alerts
+    .map((a) => {
+      const svc = a.labels['service'] ?? a.labels['job'] ?? ''
+      const svcStr = svc ? ` (${svc})` : ''
+      const summary = a.summary ? ` — ${a.summary}` : ''
+      return `[${a.severity.toUpperCase()}] ${a.name}${svcStr}${summary}`
+    })
+    .join('; ')
+}
 
 function sessionPayload() {
   return {
-    session_id:  session.sessionId,
-    grafana_url: session.grafanaUrl,
-    namespace:   session.namespace,
-    environment: session.environment,
-    services:    session.services,
-    repo_path:   session.repoPath,
+    session_id:     session.sessionId,
+    grafana_url:    session.grafanaUrl,
+    namespace:      session.namespace,
+    environment:    session.environment,
+    services:       session.services,
+    repo_path:      session.repoPath,
+    active_alerts:  alertsContext(),
   }
 }
 
