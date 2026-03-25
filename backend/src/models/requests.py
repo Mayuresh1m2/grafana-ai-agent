@@ -15,12 +15,20 @@ class AgentQueryRequest(BaseModel):
         description="Natural-language question for the AI agent.",
         examples=["What is the p99 latency of the checkout service over the last hour?"],
     )
+    # ── Session / context fields (sent at top level by the frontend) ──────────
+    session_id: str | None = Field(
+        default=None,
+        description="Active Grafana session ID (from POST /grafana/connect).",
+    )
+    namespace: str | None = Field(default=None, description="Kubernetes namespace under investigation.")
+    environment: str | None = Field(default=None, description="Environment (prod, staging, dev, …).")
+    services: list[str] = Field(default_factory=list, description="Services in scope.")
+    active_alerts: str | None = Field(default=None, description="Pre-fetched alert summary string.")
+    grafana_url: str | None = Field(default=None, description="Grafana base URL for reference.")
+    # ── Legacy / extra context ────────────────────────────────────────────────
     context: dict[str, str] = Field(
         default_factory=dict,
-        description=(
-            "Optional key-value context injected into the system prompt. "
-            "E.g. {'dashboard': 'checkout', 'environment': 'production'}."
-        ),
+        description="Additional key-value context injected into the system prompt.",
     )
     model: str | None = Field(
         default=None,
@@ -28,7 +36,7 @@ class AgentQueryRequest(BaseModel):
         examples=["llama3", "mistral", "phi3"],
     )
     temperature: float = Field(
-        default=0.7,
+        default=0.3,
         ge=0.0,
         le=2.0,
         description="Sampling temperature (0 = deterministic, 2 = very random).",
@@ -39,6 +47,22 @@ class AgentQueryRequest(BaseModel):
         le=8192,
         description="Maximum number of tokens in the response.",
     )
+
+    def build_context(self) -> dict[str, str]:
+        """Merge structured fields + legacy context dict into a single context map."""
+        ctx: dict[str, str] = {}
+        if self.namespace:
+            ctx["namespace"] = self.namespace
+        if self.environment:
+            ctx["environment"] = self.environment
+        if self.services:
+            ctx["services"] = ", ".join(self.services)
+        if self.active_alerts:
+            ctx["active_alerts"] = self.active_alerts
+        if self.grafana_url:
+            ctx["grafana_url"] = self.grafana_url
+        ctx.update(self.context)
+        return ctx
 
 
 class GrafanaConnectRequest(BaseModel):
@@ -83,6 +107,16 @@ class GrafanaConnectRequest(BaseModel):
             "The backend fetches and auto-refreshes the token via AzureCliCredential."
         ),
         examples=["api://00000000-0000-0000-0000-000000000000/.default"],
+    )
+    # ── Service Account Token mode ────────────────────────────────────────────
+    service_account_token: str | None = Field(
+        default=None,
+        description=(
+            "Grafana service account token. "
+            "Create one in Grafana → Administration → Service Accounts → Add service account token. "
+            "Sent as 'Authorization: Bearer <token>' on every request."
+        ),
+        examples=["glsa_xxxxxxxxxxxxxxxxxxxx"],
     )
 
 

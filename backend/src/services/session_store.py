@@ -32,13 +32,18 @@ class GrafanaSession:
     - **Azure CLI** (``azure_scope`` non-empty): an Azure AD Bearer token is
       fetched on each request via ``AzureCliCredential``, which reads the token
       cached by ``az login`` on the local machine and auto-refreshes it.
+    - **Service Account Token** (``service_account_token`` non-empty): a Grafana
+      service account token pasted from Grafana portal (Administration →
+      Service Accounts).  Sent as ``Authorization: Bearer <token>`` on every
+      request.
     """
 
     session_id: str
     grafana_url: str
     cookies: dict[str, str]
     datasources: list[DatasourceInfo]
-    azure_scope: str | None = None  # e.g. "api://<grafana-app-client-id>/.default"
+    azure_scope: str | None = None            # e.g. "api://<grafana-app-client-id>/.default"
+    service_account_token: str | None = None  # Grafana service account token
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def cookie_header(self) -> str:

@@ -1,6 +1,8 @@
 // ─── SSE Event Types ────────────────────────────────────────────────────────
 export type SSEEventType =
   | 'thinking'
+  | 'tool_call'
+  | 'tool_result'
   | 'content'
   | 'log_snippet'
   | 'metric'
@@ -13,6 +15,19 @@ export interface SSEThinkingEvent  { type: 'thinking'; chunk: string }
 export interface SSEContentEvent   { type: 'content';  chunk: string }
 export interface SSEDoneEvent      { type: 'done' }
 export interface SSEErrorEvent     { type: 'error'; message: string }
+
+export interface SSEToolCallEvent {
+  type: 'tool_call'
+  tool: string
+  args: Record<string, unknown>
+}
+
+export interface SSEToolResultEvent {
+  type: 'tool_result'
+  tool: string
+  summary: string
+  had_data: boolean
+}
 
 export interface SSELogSnippetEvent {
   type: 'log_snippet'
@@ -48,6 +63,8 @@ export interface SSESuggestionsEvent {
 
 export type SSEEvent =
   | SSEThinkingEvent
+  | SSEToolCallEvent
+  | SSEToolResultEvent
   | SSEContentEvent
   | SSELogSnippetEvent
   | SSEMetricEvent
@@ -94,6 +111,14 @@ export interface CodeRefArtifact {
 
 export type Artifact = LogArtifact | MetricArtifact | CodeRefArtifact
 
+// ─── Tool Call Records ───────────────────────────────────────────────────────
+export interface ToolCallRecord {
+  tool: string
+  args: Record<string, unknown>
+  summary: string
+  had_data: boolean
+}
+
 // ─── Chat Messages ──────────────────────────────────────────────────────────
 export interface ThinkingState {
   chunks: string[]          // growing array of raw text chunks
@@ -106,6 +131,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string           // markdown for assistant, plain for user
   thinking: ThinkingState | null
+  toolCalls: ToolCallRecord[]
   artifacts: Artifact[]
   suggestions: string[]     // follow-up question chips
   timestamp: Date

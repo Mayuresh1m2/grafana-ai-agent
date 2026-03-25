@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { connectGrafana, connectGrafanaCookie, connectGrafanaAzureCli } from '@/api/session'
+import {
+  connectGrafana,
+  connectGrafanaCookie,
+  connectGrafanaAzureCli,
+  connectGrafanaServiceToken,
+} from '@/api/session'
 
-type Mode = 'sso' | 'credentials' | 'azure-cli'
+type Mode = 'token' | 'azure-cli' | 'sso' | 'credentials'
 type SsoPhase = 'idle' | 'popup-open' | 'awaiting-cookie' | 'connecting' | 'done'
 
 const session = useSessionStore()
 
-const mode        = ref<Mode>('azure-cli')  // default to Azure CLI for local use
+const mode        = ref<Mode>('token')   // default: service account token
+const tokenInput  = ref('')
 const azureScope  = ref('')
 const ssoPhase    = ref<SsoPhase>('idle')
 const cookieInput = ref('')
@@ -29,13 +35,10 @@ function openPopup() {
     return
   }
   ssoPhase.value = 'popup-open'
-  // Detect when the user closes the popup
   pollTimer = setInterval(() => {
     if (popup?.closed) {
       stopPoll()
-      if (ssoPhase.value === 'popup-open') {
-        ssoPhase.value = 'awaiting-cookie'
-      }
+      if (ssoPhase.value === 'popup-open') ssoPhase.value = 'awaiting-cookie'
     }
   }, 600)
 }
@@ -57,6 +60,46 @@ function ensureSessionId() {
   if (!session.sessionId) session.sessionId = `session_${Date.now()}`
 }
 
+// ── Service Account Token submit ──────────────────────────────────────────────
+async function submitToken() {
+  if (!tokenInput.value.trim()) return
+  error.value = null
+  connecting.value = true
+  ensureSessionId()
+  try {
+    await connectGrafanaServiceToken(
+      session.grafanaUrl,
+      tokenInput.value.trim(),
+      session.sessionId as string,
+    )
+    session.authStatus = 'complete'
+    session.goToStep(3)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    session.authStatus = 'failed'
+  } finally {
+    connecting.value = false
+  }
+}
+
+// ── Azure CLI submit ──────────────────────────────────────────────────────────
+async function submitAzureCli() {
+  if (!azureScope.value.trim()) return
+  error.value = null
+  connecting.value = true
+  ensureSessionId()
+  try {
+    await connectGrafanaAzureCli(session.grafanaUrl, azureScope.value.trim(), session.sessionId as string)
+    session.authStatus = 'complete'
+    session.goToStep(3)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    session.authStatus = 'failed'
+  } finally {
+    connecting.value = false
+  }
+}
+
 // ── SSO cookie submit ─────────────────────────────────────────────────────────
 async function submitCookie() {
   if (!cookieInput.value.trim()) return
@@ -76,23 +119,6 @@ async function submitCookie() {
 }
 
 // ── Credentials submit ────────────────────────────────────────────────────────
-async function submitAzureCli() {
-  if (!azureScope.value.trim()) return
-  error.value = null
-  connecting.value = true
-  ensureSessionId()
-  try {
-    await connectGrafanaAzureCli(session.grafanaUrl, azureScope.value.trim(), session.sessionId as string)
-    session.authStatus = 'complete'
-    session.goToStep(3)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-    session.authStatus = 'failed'
-  } finally {
-    connecting.value = false
-  }
-}
-
 async function submitCredentials() {
   if (!username.value || !password.value) return
   error.value = null
@@ -133,8 +159,14 @@ function resetSso() {
     <!-- Mode toggle -->
     <div class="mode-tabs">
       <button
+        :class="['mode-tab', { active: mode === 'token' }]"
+        @click="mode = 'token'; error = null"
+      >
+        Service Account Token
+      </button>
+      <button
         :class="['mode-tab', { active: mode === 'azure-cli' }]"
-        @click="mode = 'azure-cli'"
+        @click="mode = 'azure-cli'; error = null"
       >
         Azure CLI
       </button>
@@ -146,23 +178,81 @@ function resetSso() {
       </button>
       <button
         :class="['mode-tab', { active: mode === 'credentials' }]"
-        @click="mode = 'credentials'"
+        @click="mode = 'credentials'; error = null"
       >
         Username / Password
       </button>
     </div>
 
+    <!-- ── Service Account Token flow ── -->
+    <template v-if="mode === 'token'">
+      <p class="step-panel__desc">
+        Paste a Grafana service account token — the simplest and most reliable method.
+        The token is used as a Bearer header on every request and never leaves the backend.
+      </p>
+
+      <div class="info-box">
+        <p class="info-box__title">How to get a token</p>
+        <ol class="info-box__steps">
+          <li>
+            Open Grafana → <strong>Administration</strong> →
+            <strong>Service accounts</strong>
+          </li>
+          <li>Click <strong>Add service account</strong>, give it a name, set role to <strong>Viewer</strong> (or higher)</li>
+          <li>
+            Click <strong>Add service account token</strong> → <strong>Generate token</strong>
+          </li>
+          <li>Copy the token — it is shown only once</li>
+        </ol>
+      </div>
+
+      <form class="auth-form" @submit.prevent="submitToken">
+        <label class="field">
+          <span class="field__label">Service account token</span>
+          <input
+            v-model="tokenInput"
+            type="password"
+            class="field__input field__input--mono"
+            placeholder="glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            autocomplete="off"
+            :disabled="connecting"
+          />
+          <span class="field__hint">Starts with <code>glsa_</code> (Grafana ≥ 9) or <code>eyJ</code> (older API key)</span>
+        </label>
+
+        <div v-if="connecting" class="status-card">
+          <span class="spinner" aria-label="Connecting…" />
+          <span class="status-card__title">Validating token…</span>
+        </div>
+
+        <p v-if="error" class="status-error">{{ error }}</p>
+
+        <div class="step-panel__nav">
+          <button type="button" class="btn-ghost" :disabled="connecting" @click="back">
+            Back
+          </button>
+          <button
+            type="submit"
+            class="btn-primary"
+            :disabled="connecting || !tokenInput.trim()"
+          >
+            {{ connecting ? 'Connecting…' : 'Connect' }}
+          </button>
+        </div>
+      </form>
+    </template>
+
     <!-- ── Azure CLI flow ── -->
-    <template v-if="mode === 'azure-cli'">
+    <template v-else-if="mode === 'azure-cli'">
       <p class="step-panel__desc">
         Uses your existing <code>az login</code> session — no browser popup needed.
         The backend fetches and auto-refreshes the Azure AD token via
         <code>AzureCliCredential</code>.
       </p>
 
-      <div class="azure-info">
-        <p class="azure-info__title">Prerequisites</p>
-        <ol class="azure-info__steps">
+      <div class="info-box">
+        <p class="info-box__title">Prerequisites</p>
+        <ol class="info-box__steps">
           <li>Run <code>az login</code> on this machine if you haven't already</li>
           <li>
             Find the Grafana app's <strong>Application (client) ID</strong> in
@@ -357,6 +447,18 @@ function resetSso() {
 }
 .mode-tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
 
+/* Info box (replaces azure-info, now shared) */
+.info-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.82rem;
+}
+.info-box__title { font-weight: 600; margin: 0 0 0.4rem; }
+.info-box__steps { margin: 0; padding-left: 1.2rem; line-height: 1.7; color: var(--text-muted); }
+.info-box__steps strong, .info-box__steps code { color: var(--text); }
+
 /* Status card */
 .status-card {
   display: flex;
@@ -409,17 +511,6 @@ kbd {
 .field__input--mono { font-family: var(--font-mono, monospace); font-size: 0.8rem; }
 .field__hint { font-size: 0.75rem; color: var(--text-muted); }
 .field__hint code { font-size: 0.75rem; }
-
-.azure-info {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.65rem 0.75rem;
-  font-size: 0.82rem;
-}
-.azure-info__title { font-weight: 600; margin: 0 0 0.4rem; }
-.azure-info__steps { margin: 0; padding-left: 1.2rem; line-height: 1.7; color: var(--text-muted); }
-.azure-info__steps strong, .azure-info__steps code { color: var(--text); }
 .field__input:focus { border-color: var(--accent-blue); }
 .field__input:disabled { opacity: 0.6; cursor: not-allowed; }
 

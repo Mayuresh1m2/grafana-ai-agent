@@ -44,6 +44,25 @@ function formatTime(d: Date): string {
         class="message-bubble__thinking"
       />
 
+      <!-- Tool calls -->
+      <div v-if="message.toolCalls.length" class="message-bubble__tools">
+        <div
+          v-for="(tc, i) in message.toolCalls"
+          :key="i"
+          class="tool-call"
+          :class="tc.summary ? (tc.had_data ? 'tool-call--ok' : 'tool-call--empty') : 'tool-call--pending'"
+        >
+          <span class="tool-call__icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <path d="M2 5.5h7M6.5 3l2.5 2.5L6.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="tool-call__name">{{ tc.tool }}</span>
+          <span v-if="tc.summary" class="tool-call__summary">{{ tc.summary }}</span>
+          <span v-else class="tool-call__pending">running…</span>
+        </div>
+      </div>
+
       <!-- Streaming dots while content is empty -->
       <div v-if="message.status === 'streaming' && !message.content" class="message-bubble__dots">
         <span /><span /><span />
@@ -121,6 +140,33 @@ function formatTime(d: Date): string {
 .message-bubble__thinking {
   margin-bottom: 0.25rem;
 }
+
+/* Tool calls */
+.message-bubble__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tool-call {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
+.tool-call--ok      { border-color: rgba(80, 200, 120, 0.35); color: var(--text); }
+.tool-call--empty   { border-color: var(--border); }
+.tool-call--pending { opacity: 0.7; }
+.tool-call__icon    { flex-shrink: 0; display: flex; align-items: center; }
+.tool-call--ok .tool-call__icon    { color: var(--status-ok, #50c878); }
+.tool-call--empty .tool-call__icon { color: var(--text-muted); }
+.tool-call__name    { font-family: var(--font-mono, monospace); font-weight: 500; white-space: nowrap; }
+.tool-call__summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.tool-call__pending { font-style: italic; color: var(--text-muted); }
 
 .message-bubble__content { font-size: 0.9rem; }
 
