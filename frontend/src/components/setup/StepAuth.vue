@@ -1,80 +1,104 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { initAuth, pollAuth } from '@/api/session'
+import { connectGrafana } from '@/api/session'
 
 const session = useSessionStore()
 
-const authState  = ref<string | null>(null)
-const authUrl    = ref<string | null>(null)
-const initError  = ref<string | null>(null)
-const initiating = ref(false)
+const username   = ref('')
+const password   = ref('')
+const connecting = ref(false)
+const error      = ref<string | null>(null)
 
-async function startAuth() {
-  initError.value  = null
-  initiating.value = true
+async function submit() {
+  if (!username.value || !password.value) return
+  error.value      = null
+  connecting.value = true
+
+  // Generate a stable session ID if not already set
+  if (!session.sessionId) {
+    session.sessionId = `session_${Date.now()}`
+  }
+
   try {
-    const result = await initAuth(session.grafanaUrl)
-    authUrl.value   = result.authUrl
-    authState.value = result.state
-    window.open(result.authUrl, '_blank', 'noopener,noreferrer')
-
-    session.startAuthPoll(async () => {
-      if (!authState.value) return 'failed'
-      return pollAuth(authState.value)
-    })
+    await connectGrafana(
+      session.grafanaUrl,
+      username.value,
+      password.value,
+      session.sessionId as string,
+    )
+    session.authStatus = 'complete'
+    session.goToStep(3)
   } catch (e) {
-    initError.value = e instanceof Error ? e.message : String(e)
+    error.value = e instanceof Error ? e.message : String(e)
+    session.authStatus = 'failed'
   } finally {
-    initiating.value = false
+    connecting.value = false
   }
 }
 
-function next() {
-  if (session.authStatus === 'complete') session.goToStep(3)
-}
-
 function back() {
-  session.stopAuthPoll()
+  session.authStatus = 'idle'
   session.goToStep(1)
 }
-
-onUnmounted(() => session.stopAuthPoll())
 </script>
 
 <template>
   <div class="step-panel">
     <h2 class="step-panel__title">Authenticate with Grafana</h2>
     <p class="step-panel__desc">
-      Open the Grafana OAuth flow in your browser. This page will detect
-      completion automatically (checked every 2 seconds).
+      Enter your Grafana credentials. The agent uses headless Chrome to log in
+      and obtain a session cookie — your password is never stored.
     </p>
 
-    <div v-if="session.authStatus === 'idle' || session.authStatus === 'failed'" class="step-panel__actions">
-      <button class="btn-primary" :disabled="initiating" @click="startAuth">
-        {{ initiating ? 'Opening…' : 'Open Grafana login' }}
-      </button>
-    </div>
+    <form class="auth-form" @submit.prevent="submit">
+      <label class="field">
+        <span class="field__label">Username / e-mail</span>
+        <input
+          v-model="username"
+          type="text"
+          autocomplete="username"
+          placeholder="admin"
+          class="field__input"
+          :disabled="connecting"
+        />
+      </label>
 
-    <div v-else-if="session.authStatus === 'pending'" class="auth-polling">
-      <span class="spinner" aria-label="Waiting for authentication…" />
-      <span class="auth-polling__text">Waiting for login to complete…</span>
-    </div>
+      <label class="field">
+        <span class="field__label">Password</span>
+        <input
+          v-model="password"
+          type="password"
+          autocomplete="current-password"
+          placeholder="••••••••"
+          class="field__input"
+          :disabled="connecting"
+        />
+      </label>
 
-    <p v-if="session.authStatus === 'complete'" class="status-ok">
-      Authenticated successfully
-    </p>
-    <p v-else-if="session.authStatus === 'failed'" class="status-error">
-      Authentication failed. Please try again.
-    </p>
-    <p v-if="initError" class="status-error">{{ initError }}</p>
+      <div v-if="connecting" class="auth-polling">
+        <span class="spinner" aria-label="Logging in…" />
+        <span class="auth-polling__text">Logging in via headless browser…</span>
+      </div>
 
-    <div class="step-panel__nav">
-      <button class="btn-ghost" @click="back">Back</button>
-      <button class="btn-primary" :disabled="session.authStatus !== 'complete'" @click="next">
-        Next
-      </button>
-    </div>
+      <p v-if="error" class="status-error">{{ error }}</p>
+      <p v-if="session.authStatus === 'complete'" class="status-ok">
+        Authenticated successfully
+      </p>
+
+      <div class="step-panel__nav">
+        <button type="button" class="btn-ghost" :disabled="connecting" @click="back">
+          Back
+        </button>
+        <button
+          type="submit"
+          class="btn-primary"
+          :disabled="connecting || !username || !password"
+        >
+          {{ connecting ? 'Connecting…' : 'Connect' }}
+        </button>
+      </div>
+    </form>
   </div>
 </template>
 
@@ -82,10 +106,26 @@ onUnmounted(() => session.stopAuthPoll())
 .step-panel { display: flex; flex-direction: column; gap: 1rem; }
 .step-panel__title { font-size: 1.25rem; font-weight: 600; margin: 0; }
 .step-panel__desc  { color: var(--text-muted); font-size: 0.9rem; margin: 0; }
-.step-panel__actions { display: flex; gap: 0.75rem; }
-.step-panel__nav { display: flex; gap: 0.75rem; margin-top: 0.5rem; }
-.status-ok    { font-size: 0.85rem; color: var(--status-ok); }
-.status-error { font-size: 0.85rem; color: var(--status-error); }
+.step-panel__nav   { display: flex; gap: 0.75rem; margin-top: 0.5rem; }
+
+.auth-form { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.field { display: flex; flex-direction: column; gap: 0.3rem; }
+.field__label { font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
+.field__input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+}
+.field__input:focus { border-color: var(--accent-blue); }
+.field__input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.status-ok    { font-size: 0.85rem; color: var(--status-ok); margin: 0; }
+.status-error { font-size: 0.85rem; color: var(--status-error); margin: 0; }
 
 .auth-polling {
   display: flex;
@@ -96,7 +136,6 @@ onUnmounted(() => session.stopAuthPoll())
   border-radius: var(--radius);
   border: 1px solid var(--border);
 }
-
 .auth-polling__text { font-size: 0.9rem; color: var(--text-muted); }
 
 .spinner {

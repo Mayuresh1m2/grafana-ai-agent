@@ -19,3 +19,20 @@ class AgentQueryResponse(BaseModel):
     query: str
     model: str
     tokens_used: int | None = None
+
+
+class DatasourceInfo(BaseModel):
+    """Grafana datasource summary returned to the frontend."""
+
+    uid: str
+    name: str
+    type: str
+    is_default: bool = False
+
+
+class GrafanaConnectResponse(BaseModel):
+    """Response body for POST /api/v1/grafana/connect."""
+
+    session_id: str
+    grafana_url: str
+    datasources: list[DatasourceInfo]

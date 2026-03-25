@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class AgentQueryRequest(BaseModel):
@@ -39,3 +39,19 @@ class AgentQueryRequest(BaseModel):
         le=8192,
         description="Maximum number of tokens in the response.",
     )
+
+
+class GrafanaConnectRequest(BaseModel):
+    """Request body for POST /api/v1/grafana/connect."""
+
+    session_id: str = Field(
+        ...,
+        description="Opaque client-generated session identifier.",
+    )
+    grafana_url: str = Field(
+        ...,
+        description="Base URL of the Grafana instance (no trailing slash).",
+        examples=["https://grafana.example.com"],
+    )
+    username: str = Field(..., description="Grafana username or e-mail.")
+    password: str = Field(..., description="Grafana password.")
