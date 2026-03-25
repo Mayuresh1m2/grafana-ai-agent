@@ -107,6 +107,27 @@ class OllamaService:
         models: list[dict[str, object]] = data.get("models", [])  # type: ignore[assignment]
         return [str(m.get("name", "")) for m in models]
 
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        system: str,
+        model: str | None = None,
+        temperature: float = 0.3,
+    ) -> str:
+        """Multi-turn chat via Ollama /api/chat."""
+        effective_model = model or self._settings.ollama_model
+        payload: dict[str, object] = {
+            "model": effective_model,
+            "system": system,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        resp = await self._client.post("/api/chat", json=payload)
+        resp.raise_for_status()
+        data: dict[str, object] = resp.json()
+        return str((data.get("message") or {}).get("content", ""))
+
     async def generate_stream(
         self,
         prompt: str,

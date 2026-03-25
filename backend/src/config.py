@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     # ── Tempo ────────────────────────────────────────────────────────────────
     tempo_base_url: str = "http://localhost:3200"
 
+    # ── Grafana MCP Server ────────────────────────────────────────────────────
+    # Set one of these to enable MCP mode.
+    # Option A — stdio: path/command for the mcp-grafana binary
+    #   e.g. "mcp-grafana"  (if installed in PATH via `go install`)
+    #        "npx @grafana/mcp-grafana"  (via npm)
+    # Option B — SSE: URL of a running MCP server's /sse endpoint
+    #   e.g. "http://localhost:8888/sse"
+    grafana_mcp_command: str = Field(default="mcp-grafana", repr=False)
+    grafana_mcp_url: str = Field(default="", repr=False)      # SSE transport (takes priority)
+    grafana_mcp_enabled: bool = True
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

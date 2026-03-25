@@ -19,6 +19,8 @@ dependencies = [
     "playwright>=1.43.0",
     "cryptography>=42.0.0",
     "azure-identity>=1.16.0",
+    # Grafana MCP server client
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]

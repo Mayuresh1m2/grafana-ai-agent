@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSSE } from '@/composables/useSSE'
-import type { ChatMessage, SSEEvent, Artifact } from '@/types/chat'
+import type { ChatMessage, SSEEvent, Artifact, ToolCallRecord } from '@/types/chat'
 
 let _msgCounter = 0
 function newId() { return `msg_${++_msgCounter}_${Date.now()}` }
@@ -28,6 +28,7 @@ export const useChatStore = defineStore('chat', () => {
       role:        'user',
       content:     query,
       thinking:    null,
+      toolCalls:   [],
       artifacts:   [],
       suggestions: [],
       timestamp:   new Date(),
@@ -40,6 +41,7 @@ export const useChatStore = defineStore('chat', () => {
       role:        'assistant',
       content:     '',
       thinking:    { chunks: [], isDone: false, collapsed: false },
+      toolCalls:   [],
       artifacts:   [],
       suggestions: [],
       timestamp:   new Date(),
@@ -97,6 +99,21 @@ export const useChatStore = defineStore('chat', () => {
 
     if (event.type === 'thinking') {
       if (msg.thinking) msg.thinking.chunks.push(event.chunk)
+      return
+    }
+    if (event.type === 'tool_call') {
+      const record: ToolCallRecord = { tool: event.tool, args: event.args, summary: '', had_data: false }
+      msg.toolCalls = [...msg.toolCalls, record]
+      return
+    }
+    if (event.type === 'tool_result') {
+      const idx = [...msg.toolCalls].reverse().findIndex((r) => r.tool === event.tool)
+      if (idx !== -1) {
+        const realIdx = msg.toolCalls.length - 1 - idx
+        const updated = [...msg.toolCalls]
+        updated[realIdx] = { ...updated[realIdx], summary: event.summary, had_data: event.had_data }
+        msg.toolCalls = updated
+      }
       return
     }
     if (event.type === 'content') {
