@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import AsyncIterator
 from functools import lru_cache
 
 import httpx
@@ -105,6 +106,37 @@ class OllamaService:
         data: dict[str, object] = response.json()
         models: list[dict[str, object]] = data.get("models", [])  # type: ignore[assignment]
         return [str(m.get("name", "")) for m in models]
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system: str,
+        model: str | None = None,
+        temperature: float = 0.3,
+    ) -> AsyncIterator[str]:
+        """Stream an Ollama response token-by-token as an async generator."""
+        effective_model = model or self._settings.ollama_model
+        payload: dict[str, object] = {
+            "model": effective_model,
+            "prompt": prompt,
+            "system": system,
+            "stream": True,
+            "options": {"temperature": temperature},
+        }
+        async with self._client.stream("POST", "/api/generate", json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                    token: str = chunk.get("response", "")
+                    if token:
+                        yield token
+                    if chunk.get("done"):
+                        break
+                except (json.JSONDecodeError, KeyError):
+                    continue
 
     async def aclose(self) -> None:
         await self._client.aclose()

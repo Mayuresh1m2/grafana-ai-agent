@@ -6,12 +6,31 @@ import { useChatStore }    from '@/stores/chatStore'
 import Sidebar              from '@/components/chat/Sidebar.vue'
 import MessageBubble        from '@/components/chat/MessageBubble.vue'
 import ChatInput            from '@/components/chat/ChatInput.vue'
+import ReportModal          from '@/components/chat/ReportModal.vue'
 import ErrorBoundary        from '@/components/common/ErrorBoundary.vue'
 import SessionExpiredBanner from '@/components/common/SessionExpiredBanner.vue'
+import { useReportStore }   from '@/stores/reportStore'
 
 const router  = useRouter()
 const session = useSessionStore()
 const chat    = useChatStore()
+const report  = useReportStore()
+
+const showReport = ref(false)
+
+function openReport() {
+  report.reset()
+  showReport.value = true
+  report.generate(chat.messages, {
+    environment:  session.environment,
+    namespace:    session.namespace,
+    services:     session.services.join(', '),
+    grafana_url:  session.grafanaUrl,
+    active_alerts: session.alerts.length
+      ? session.alerts.map((a) => `[${a.severity.toUpperCase()}] ${a.name}`).join(', ')
+      : 'none',
+  })
+}
 
 const scrollEl = ref<HTMLElement | null>(null)
 
@@ -80,7 +99,11 @@ const suggestions = computed<string[]>(() => {
 
 <template>
   <div class="chat-view">
-    <Sidebar class="chat-view__sidebar" @quick-action="handleQuickAction" />
+    <Sidebar
+      class="chat-view__sidebar"
+      @quick-action="handleQuickAction"
+      @generate-report="openReport"
+    />
 
     <div class="chat-view__main">
       <ErrorBoundary>
@@ -133,6 +156,9 @@ const suggestions = computed<string[]>(() => {
       </ErrorBoundary>
     </div>
   </div>
+
+  <!-- Report modal -->
+  <ReportModal v-if="showReport" @close="showReport = false" />
 </template>
 
 <style scoped>

@@ -83,3 +83,30 @@ class GrafanaRefreshRequest(BaseModel):
         ...,
         description="Fresh Cookie header value obtained after re-logging in.",
     )
+
+
+class ConversationTurn(BaseModel):
+    """A single message turn for the report generator."""
+
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str = Field(..., description="Message content (markdown for assistant).")
+
+
+class ReportRequest(BaseModel):
+    """Request body for POST /api/v1/agent/report."""
+
+    conversation: list[ConversationTurn] = Field(
+        ...,
+        description="Full Q&A transcript from the investigation session.",
+    )
+    context: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Session context injected into the report prompt "
+            "(namespace, environment, services, active_alerts, …)."
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description="Ollama model name. Falls back to OLLAMA_MODEL env var.",
+    )

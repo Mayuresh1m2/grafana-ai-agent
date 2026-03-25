@@ -7,6 +7,11 @@ const session = useSessionStore()
 const chat    = useChatStore()
 const router  = useRouter()
 
+const emit = defineEmits<{
+  (e: 'quick-action', q: string): void
+  (e: 'generate-report'): void
+}>()
+
 const QUICK_ACTIONS = [
   'What services are currently alerting?',
   'Show me recent error logs',
@@ -14,7 +19,7 @@ const QUICK_ACTIONS = [
   'Any anomalies in the last hour?',
 ]
 
-const emit = defineEmits<{ (e: 'quick-action', q: string): void }>()
+// emit is already defined above
 
 function goSetup() {
   session.resetSetup()
@@ -97,6 +102,14 @@ function goSetup() {
     </div>
 
     <div class="sidebar__footer">
+      <button
+        class="btn-primary sidebar__report-btn"
+        :disabled="!chat.hasMessages || chat.isStreaming"
+        title="Generate post-incident report from this investigation"
+        @click="emit('generate-report')"
+      >
+        Generate Report
+      </button>
       <button class="btn-ghost sidebar__clear" @click="chat.clearMessages">
         Clear chat
       </button>
@@ -194,6 +207,12 @@ function goSetup() {
   border-top: 1px solid var(--border);
 }
 
+.sidebar__report-btn {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  width: 100%;
+  justify-content: center;
+}
 .sidebar__clear,
 .sidebar__reconfigure {
   font-size: 0.78rem;
