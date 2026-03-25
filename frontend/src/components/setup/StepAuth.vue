@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { connectGrafana, connectGrafanaCookie } from '@/api/session'
+import { connectGrafana, connectGrafanaCookie, connectGrafanaAzureCli } from '@/api/session'
 
-type Mode = 'sso' | 'credentials'
+type Mode = 'sso' | 'credentials' | 'azure-cli'
 type SsoPhase = 'idle' | 'popup-open' | 'awaiting-cookie' | 'connecting' | 'done'
 
 const session = useSessionStore()
 
-const mode        = ref<Mode>('sso')
+const mode        = ref<Mode>('azure-cli')  // default to Azure CLI for local use
+const azureScope  = ref('')
 const ssoPhase    = ref<SsoPhase>('idle')
 const cookieInput = ref('')
 const username    = ref('')
@@ -75,6 +76,23 @@ async function submitCookie() {
 }
 
 // ── Credentials submit ────────────────────────────────────────────────────────
+async function submitAzureCli() {
+  if (!azureScope.value.trim()) return
+  error.value = null
+  connecting.value = true
+  ensureSessionId()
+  try {
+    await connectGrafanaAzureCli(session.grafanaUrl, azureScope.value.trim(), session.sessionId as string)
+    session.authStatus = 'complete'
+    session.goToStep(3)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    session.authStatus = 'failed'
+  } finally {
+    connecting.value = false
+  }
+}
+
 async function submitCredentials() {
   if (!username.value || !password.value) return
   error.value = null
@@ -115,6 +133,12 @@ function resetSso() {
     <!-- Mode toggle -->
     <div class="mode-tabs">
       <button
+        :class="['mode-tab', { active: mode === 'azure-cli' }]"
+        @click="mode = 'azure-cli'"
+      >
+        Azure CLI
+      </button>
+      <button
         :class="['mode-tab', { active: mode === 'sso' }]"
         @click="mode = 'sso'; resetSso()"
       >
@@ -128,8 +152,64 @@ function resetSso() {
       </button>
     </div>
 
+    <!-- ── Azure CLI flow ── -->
+    <template v-if="mode === 'azure-cli'">
+      <p class="step-panel__desc">
+        Uses your existing <code>az login</code> session — no browser popup needed.
+        The backend fetches and auto-refreshes the Azure AD token via
+        <code>AzureCliCredential</code>.
+      </p>
+
+      <div class="azure-info">
+        <p class="azure-info__title">Prerequisites</p>
+        <ol class="azure-info__steps">
+          <li>Run <code>az login</code> on this machine if you haven't already</li>
+          <li>
+            Find the Grafana app's <strong>Application (client) ID</strong> in
+            Azure Portal → App registrations → your Grafana app → Overview
+          </li>
+        </ol>
+      </div>
+
+      <form class="auth-form" @submit.prevent="submitAzureCli">
+        <label class="field">
+          <span class="field__label">Grafana Azure AD scope</span>
+          <input
+            v-model="azureScope"
+            type="text"
+            class="field__input field__input--mono"
+            placeholder="api://00000000-0000-0000-0000-000000000000/.default"
+            :disabled="connecting"
+          />
+          <span class="field__hint">
+            Format: <code>api://&lt;grafana-client-id&gt;/.default</code>
+          </span>
+        </label>
+
+        <div v-if="connecting" class="status-card">
+          <span class="spinner" aria-label="Connecting…" />
+          <span class="status-card__title">Fetching token via Azure CLI…</span>
+        </div>
+
+        <p v-if="error" class="status-error">{{ error }}</p>
+
+        <div class="step-panel__nav">
+          <button type="button" class="btn-ghost" :disabled="connecting" @click="back">
+            Back
+          </button>
+          <button
+            type="submit"
+            class="btn-primary"
+            :disabled="connecting || !azureScope.trim()"
+          >
+            {{ connecting ? 'Connecting…' : 'Connect' }}
+          </button>
+        </div>
+      </form>
+    </template>
+
     <!-- ── SSO flow ── -->
-    <template v-if="mode === 'sso'">
+    <template v-else-if="mode === 'sso'">
       <p class="step-panel__desc">
         Open Grafana in a pop-up, complete the Microsoft login, then copy the
         session cookie and paste it below.
@@ -196,7 +276,7 @@ function resetSso() {
     </template>
 
     <!-- ── Credentials flow ── -->
-    <template v-else>
+    <template v-else-if="mode === 'credentials'">
       <p class="step-panel__desc">
         Enter your Grafana credentials. A headless browser will log in and extract
         the session cookie — your password is never stored.
@@ -327,6 +407,19 @@ kbd {
   resize: vertical;
 }
 .field__input--mono { font-family: var(--font-mono, monospace); font-size: 0.8rem; }
+.field__hint { font-size: 0.75rem; color: var(--text-muted); }
+.field__hint code { font-size: 0.75rem; }
+
+.azure-info {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.82rem;
+}
+.azure-info__title { font-weight: 600; margin: 0 0 0.4rem; }
+.azure-info__steps { margin: 0; padding-left: 1.2rem; line-height: 1.7; color: var(--text-muted); }
+.azure-info__steps strong, .azure-info__steps code { color: var(--text); }
 .field__input:focus { border-color: var(--accent-blue); }
 .field__input:disabled { opacity: 0.6; cursor: not-allowed; }
 

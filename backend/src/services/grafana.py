@@ -1,13 +1,18 @@
-"""Cookie-authenticated Grafana HTTP client.
+"""Grafana HTTP client — supports cookie auth and Azure CLI Bearer auth.
 
 All Loki and Prometheus queries are routed through the Grafana datasource proxy
-(``/api/datasources/proxy/uid/{uid}/...``) using the session cookie obtained
-via :mod:`src.services.grafana_auth`.  This means only one endpoint URL is
-needed — the Grafana base URL — rather than separate Loki / Prometheus URLs.
+(``/api/datasources/proxy/uid/{uid}/...``).
+
+Two authentication modes:
+- **Cookie** (default): browser session cookie from Playwright login or SSO relay.
+- **Azure CLI**: Azure AD Bearer token fetched via ``AzureCliCredential``, which
+  reads the token cached by ``az login`` on the local machine.  Token refresh
+  is handled automatically by the credential — no user interaction needed.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 import httpx
@@ -51,23 +56,63 @@ def _raise_for_status(resp: httpx.Response) -> None:
 class GrafanaClient:
     """Thin async wrapper around the Grafana REST API + datasource proxy.
 
-    Constructed per-request from a :class:`~src.services.session_store.GrafanaSession`.
-    All requests use the browser-extracted session cookie.
+    Do not construct directly — use the async factory :meth:`create` so that
+    Azure CLI token fetching (which is synchronous) is handled off the event loop.
     """
 
-    def __init__(self, session: GrafanaSession) -> None:
+    def __init__(self, session: GrafanaSession, auth_header: dict[str, str]) -> None:
         self._session = session
         self._http = httpx.AsyncClient(
             base_url=session.grafana_url,
-            headers={
-                "Cookie": session.cookie_header(),
-                "Accept": "application/json",
-            },
+            headers={**auth_header, "Accept": "application/json"},
             verify=False,  # noqa: S501 — same tolerance as browser login
             timeout=60.0,
         )
 
-    # ── Datasource helpers ────────────────────────────────────────────────────
+    @classmethod
+    async def create(cls, session: GrafanaSession) -> "GrafanaClient":
+        """Async factory — resolves auth credentials before building the client."""
+        if session.azure_scope:
+            auth_header = await cls._azure_bearer(session.azure_scope)
+        else:
+            auth_header = {"Cookie": session.cookie_header()}
+        return cls(session, auth_header)
+
+    @staticmethod
+    async def _azure_bearer(scope: str) -> dict[str, str]:
+        """Fetch an Azure AD Bearer token via the local ``az login`` cache."""
+        from azure.identity import AzureCliCredential  # lazy import — optional dep
+
+        def _get() -> str:
+            token = AzureCliCredential().get_token(scope)
+            return token.token
+
+        access_token = await asyncio.to_thread(_get)
+        return {"Authorization": f"Bearer {access_token}"}
+
+    # ── Datasource helpers ─────────────────────────────────────────────────────
+
+    async def fetch_datasources_from_api(self) -> list[DatasourceInfo]:
+        """Call ``GET /api/datasources`` using this client's credentials.
+
+        Used during the connect flow to validate credentials and discover
+        datasources without going through the auth service.
+        """
+        resp = await self._http.get("/api/datasources")
+        _raise_for_status(resp)
+        raw: list[dict[str, object]] = resp.json()
+        return [
+            DatasourceInfo(
+                uid=str(ds.get("uid", "")),
+                name=str(ds.get("name", "")),
+                type=str(ds.get("type", "")),
+                is_default=bool(ds.get("isDefault", False)),
+            )
+            for ds in raw
+            if ds.get("uid")
+        ]
+
+    # ── Cached datasource helpers ──────────────────────────────────────────────
 
     def get_datasources(self) -> list[DatasourceInfo]:
         """Return the datasource list cached at login time."""
@@ -300,4 +345,4 @@ async def get_grafana_client(
                 "Call POST /api/v1/grafana/connect first."
             ),
         )
-    return GrafanaClient(session)
+    return await GrafanaClient.create(session)

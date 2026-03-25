@@ -73,6 +73,17 @@ class GrafanaConnectRequest(BaseModel):
             "SSO manually (e.g. 'grafana_session=abc123; grafana_session_expiry=...')."
         ),
     )
+    # ── Azure CLI mode ────────────────────────────────────────────────────────
+    azure_scope: str | None = Field(
+        default=None,
+        description=(
+            "Azure AD scope for the Grafana application. "
+            "Format: 'api://<grafana-app-client-id>/.default'. "
+            "Requires 'az login' to be completed on the local machine. "
+            "The backend fetches and auto-refreshes the token via AzureCliCredential."
+        ),
+        examples=["api://00000000-0000-0000-0000-000000000000/.default"],
+    )
 
 
 class GrafanaRefreshRequest(BaseModel):

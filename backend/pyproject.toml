@@ -15,9 +15,10 @@ dependencies = [
     "httpx>=0.27.0",
     "python-dotenv>=1.0.1",
     "anyio>=4.4.0",
-    # Grafana auth tool
+    # Grafana auth
     "playwright>=1.43.0",
     "cryptography>=42.0.0",
+    "azure-identity>=1.16.0",
 ]
 
 [project.optional-dependencies]

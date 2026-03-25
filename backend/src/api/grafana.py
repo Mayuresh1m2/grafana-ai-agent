@@ -1,8 +1,9 @@
 """Grafana session management endpoints.
 
-POST /connect  — authenticate (credentials or cookie relay) and discover datasources.
+POST /connect  — authenticate (credentials, cookie relay, or Azure CLI) and discover datasources.
 POST /refresh  — replace an expired session cookie without re-running the full flow.
 GET  /datasources — return the datasource list for an active session.
+GET  /alerts   — return currently firing alerts.
 """
 
 from __future__ import annotations
@@ -81,16 +82,57 @@ async def connect(
 ) -> GrafanaConnectResponse:
     log = logger.bind(session_id=body.session_id, grafana_url=body.grafana_url)
 
-    has_credentials = body.username and body.password
-    has_cookie = bool(body.cookie_header)
+    has_credentials = bool(body.username and body.password)
+    has_cookie      = bool(body.cookie_header)
+    has_azure       = bool(body.azure_scope)
 
-    if not has_credentials and not has_cookie:
+    if not has_credentials and not has_cookie and not has_azure:
         raise HTTPException(
             status_code=422,
-            detail="Provide either (username + password) or cookie_header.",
+            detail="Provide one of: (username + password), cookie_header, or azure_scope.",
         )
 
-    # ── Resolve cookies ────────────────────────────────────────────────────────
+    # ── Azure CLI path — no cookie; token fetched per-request ─────────────────
+    if has_azure:
+        log.info("grafana_connect_azure_cli")
+        tentative = GrafanaSession(
+            session_id=body.session_id,
+            grafana_url=body.grafana_url,
+            cookies={},
+            datasources=[],
+            azure_scope=body.azure_scope,
+        )
+        try:
+            client = await GrafanaClient.create(tentative)
+            datasources = await client.fetch_datasources_from_api()
+            await client.aclose()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("grafana_azure_connect_failed", error=str(exc))
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    f"Azure CLI auth failed: {exc}. "
+                    "Make sure 'az login' is completed and the scope is correct."
+                ),
+            ) from exc
+
+        log.info("grafana_datasources_discovered", count=len(datasources))
+        await store.put(GrafanaSession(
+            session_id=body.session_id,
+            grafana_url=body.grafana_url,
+            cookies={},
+            datasources=datasources,
+            azure_scope=body.azure_scope,
+        ))
+        return GrafanaConnectResponse(
+            session_id=body.session_id,
+            grafana_url=body.grafana_url,
+            datasources=datasources,
+        )
+
+    # ── Cookie / credentials path ──────────────────────────────────────────────
     if has_cookie:
         log.info("grafana_connect_cookie_relay")
         cookies = _parse_cookie_header(body.cookie_header)  # type: ignore[arg-type]

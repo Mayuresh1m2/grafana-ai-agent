@@ -71,6 +71,14 @@ export async function connectGrafanaCookie(
   return _postConnect({ session_id: sessionId, grafana_url: grafanaUrl, cookie_header: cookieHeader })
 }
 
+export async function connectGrafanaAzureCli(
+  grafanaUrl: string,
+  azureScope: string,
+  sessionId: string,
+): Promise<GrafanaConnectResult> {
+  return _postConnect({ session_id: sessionId, grafana_url: grafanaUrl, azure_scope: azureScope })
+}
+
 export async function refreshGrafanaCookie(
   sessionId: string,
   cookieHeader: string,

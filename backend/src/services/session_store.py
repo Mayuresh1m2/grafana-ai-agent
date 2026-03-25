@@ -24,12 +24,21 @@ logger = structlog.get_logger(__name__)
 
 @dataclass
 class GrafanaSession:
-    """Everything the backend needs to proxy Grafana API calls for one user."""
+    """Everything the backend needs to proxy Grafana API calls for one user.
+
+    Authentication is one of:
+    - **Cookie-based** (``cookies`` non-empty): browser session cookie extracted
+      via Playwright or pasted from the browser after Microsoft SSO.
+    - **Azure CLI** (``azure_scope`` non-empty): an Azure AD Bearer token is
+      fetched on each request via ``AzureCliCredential``, which reads the token
+      cached by ``az login`` on the local machine and auto-refreshes it.
+    """
 
     session_id: str
     grafana_url: str
     cookies: dict[str, str]
     datasources: list[DatasourceInfo]
+    azure_scope: str | None = None  # e.g. "api://<grafana-app-client-id>/.default"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def cookie_header(self) -> str:
