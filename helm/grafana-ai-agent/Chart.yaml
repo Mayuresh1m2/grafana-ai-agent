@@ -1,0 +1,16 @@
+apiVersion: v2
+name: grafana-ai-agent
+description: AI-powered Grafana observability assistant (FastAPI backend + Vue 3 frontend)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - grafana
+  - ai
+  - llm
+  - observability
+  - oncall
+home: https://github.com/Mayuresh1m2/grafana-ai-agent
+maintainers:
+  - name: platform-team
+    email: platform@example.com

@@ -1,0 +1,70 @@
+---
+# Pre-install / pre-upgrade hook: verify Ollama is reachable before deploying.
+#
+# This prevents the silent failure mode where the app deploys successfully but
+# every LLM call errors at runtime because Ollama is down or misconfigured.
+# A failed hook aborts the release with a clear message visible in helm output.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "grafana-ai-agent.fullname" . }}-verify-ollama
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "grafana-ai-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hook
+  annotations:
+    # Run before install AND upgrade so a config change to ollama.hostUrl is validated
+    "helm.sh/hook": pre-install,pre-upgrade
+    # Lower weight = runs first (negative = before other pre-install hooks)
+    "helm.sh/hook-weight": "-5"
+    # Clean up on success; leave pod on failure so operator can read logs
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 0    # fail fast — no retries; a misconfigured URL won't fix itself
+  template:
+    metadata:
+      labels:
+        {{- include "grafana-ai-agent.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hook
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534    # nobody
+      containers:
+        - name: verify-ollama
+          image: curlimages/curl:8.7.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              OLLAMA_URL="{{ .Values.ollama.hostUrl }}"
+              echo "=== Grafana AI Agent: pre-flight Ollama check ==="
+              echo "    Target: ${OLLAMA_URL}/api/tags"
+              echo ""
+              if curl -sf --max-time 10 --retry 2 --retry-delay 2 \
+                       "${OLLAMA_URL}/api/tags" > /dev/null 2>&1; then
+                echo "✓ Ollama is reachable at ${OLLAMA_URL}"
+                echo "  Proceeding with deployment."
+                exit 0
+              else
+                echo ""
+                echo "✗ ERROR: Ollama did not respond at ${OLLAMA_URL}/api/tags"
+                echo ""
+                echo "  Common causes:"
+                echo "    1. Ollama is not running on the host ('ollama serve')"
+                echo "    2. ollama.hostUrl is wrong in your values:"
+                echo "         k3d:          http://host.k3d.internal:11434"
+                echo "         k3s/bare-metal: http://<host-ip>:11434"
+                echo "    3. Host firewall is blocking port 11434 from the cluster"
+                echo ""
+                echo "  Fix: helm upgrade ... --set ollama.hostUrl=<correct-url>"
+                exit 1
+              fi

@@ -6,13 +6,17 @@
         format format-backend format-frontend \
         build build-backend build-frontend \
         docker-build docker-build-backend docker-build-frontend \
+        helm-lint helm-template-test \
         pre-commit-install clean down help
 
 BACKEND_DIR  := backend
 FRONTEND_DIR := frontend
+HELM_CHART   := helm/grafana-ai-agent
 
-DOCKER_REGISTRY ?= ghcr.io/your-org
+DOCKER_REGISTRY ?= ghcr.io/mayuresh1m2
 VERSION        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+BUILD_DATE     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_COMMIT     ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 CYAN  := \033[0;36m
@@ -100,8 +104,11 @@ build-frontend: ## Build frontend static assets
 # ── Docker ────────────────────────────────────────────────────────────────────
 docker-build: docker-build-backend docker-build-frontend ## Build both Docker images
 
-docker-build-backend: ## Build backend image
+docker-build-backend: ## Build backend image (passes APP_VERSION, BUILD_DATE, GIT_COMMIT)
 	docker build \
+		--build-arg APP_VERSION=$(VERSION) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--tag $(DOCKER_REGISTRY)/grafana-ai-agent-backend:$(VERSION) \
 		--tag $(DOCKER_REGISTRY)/grafana-ai-agent-backend:latest \
 		--file $(BACKEND_DIR)/Dockerfile \
@@ -113,6 +120,18 @@ docker-build-frontend: ## Build frontend image
 		--tag $(DOCKER_REGISTRY)/grafana-ai-agent-frontend:latest \
 		--file $(FRONTEND_DIR)/Dockerfile \
 		$(FRONTEND_DIR)
+
+# ── Helm ──────────────────────────────────────────────────────────────────────
+HELM_TEST_ARGS := \
+	--set ollama.hostUrl=http://host.k3d.internal:11434 \
+	--set secrets.grafanaTokenKey=ci-test-token
+
+helm-lint: ## Lint the Helm chart
+	helm lint $(HELM_CHART) $(HELM_TEST_ARGS)
+
+helm-template-test: ## Render chart and validate with kubectl dry-run (no cluster needed)
+	helm template grafana-ai-agent $(HELM_CHART) $(HELM_TEST_ARGS) \
+		| kubectl apply --dry-run=client -f -
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 pre-commit-install: ## Install git pre-commit hooks (backend)

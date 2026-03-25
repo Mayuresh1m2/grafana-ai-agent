@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "grafana-ai-agent.backendName" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "grafana-ai-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+data:
+  APP_NAME: "grafana-ai-agent"
+  LOG_LEVEL: {{ .Values.backend.config.logLevel | quote }}
+  DEBUG:     {{ .Values.backend.config.debug | quote }}
+
+  # Ollama — required; fails helm template/install with a human-readable message
+  # if the operator forgot to set it.
+  OLLAMA_BASE_URL: {{ required "ollama.hostUrl is required. Set it to the URL the cluster uses to reach host Ollama, e.g. --set ollama.hostUrl=http://host.k3d.internal:11434" .Values.ollama.hostUrl | quote }}
+  OLLAMA_MODEL:    {{ .Values.backend.config.ollamaModel | quote }}
+  OLLAMA_TIMEOUT:  {{ .Values.backend.config.ollamaTimeout | quote }}
+
+  # Grafana / Loki / Prometheus / Tempo — URLs can be empty when disabled
+  {{- if .Values.grafana.enabled }}
+  GRAFANA_BASE_URL: {{ .Values.grafana.url | quote }}
+  {{- else }}
+  GRAFANA_BASE_URL: ""
+  {{- end }}
+  {{- if .Values.loki.enabled }}
+  LOKI_BASE_URL: {{ .Values.loki.url | quote }}
+  {{- else }}
+  LOKI_BASE_URL: ""
+  {{- end }}
+  {{- if .Values.prometheus.enabled }}
+  PROMETHEUS_BASE_URL: {{ .Values.prometheus.url | quote }}
+  {{- else }}
+  PROMETHEUS_BASE_URL: ""
+  {{- end }}
+  {{- if .Values.tempo.enabled }}
+  TEMPO_BASE_URL: {{ .Values.tempo.url | quote }}
+  {{- else }}
+  TEMPO_BASE_URL: ""
+  {{- end }}
+
+  CORS_ORIGINS: {{ .Values.backend.config.corsOrigins | quote }}

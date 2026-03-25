@@ -1,0 +1,139 @@
+# ─── Backend ─────────────────────────────────────────────────────────────────
+backend:
+  image:
+    repository: ghcr.io/mayuresh1m2/grafana-ai-agent-backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"          # 1 full core — Ollama calls + playwright can spike
+      memory: 1Gi
+
+  config:
+    logLevel: INFO
+    debug: "false"
+    ollamaModel: llama3
+    ollamaTimeout: "120.0"
+    corsOrigins: '["https://grafana-agent.local"]'
+
+# ─── Frontend ─────────────────────────────────────────────────────────────────
+frontend:
+  image:
+    repository: ghcr.io/mayuresh1m2/grafana-ai-agent-frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Runtime API URL injected into env.js via docker-entrypoint.sh.
+  # Leave empty to use relative paths (recommended when ingress proxies /api).
+  apiUrl: ""
+
+# ─── Ollama (runs on HOST — NOT in cluster) ───────────────────────────────────
+# Required. The URL the cluster pods use to reach the host's Ollama process.
+#
+#   k3d (Docker Desktop):     http://host.k3d.internal:11434
+#   k3s (bare-metal/VM):      http://<host-ip>:11434
+#   Lima / Rancher Desktop:   http://host.lima.internal:11434
+#
+# helm install ... --set ollama.hostUrl=http://host.k3d.internal:11434
+ollama:
+  hostUrl: ""   # REQUIRED — deploy fails with a clear message if empty
+
+# ─── Observability stack ──────────────────────────────────────────────────────
+# Set enabled: false for components not present in your cluster.
+# The URLs below assume a 'monitoring' namespace — adjust as needed.
+grafana:
+  enabled: true
+  url: "http://grafana.monitoring.svc.cluster.local:3000"
+
+loki:
+  enabled: true
+  url: "http://loki-gateway.monitoring.svc.cluster.local:3100"
+
+prometheus:
+  enabled: true
+  url: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+
+tempo:
+  enabled: false
+  url: "http://tempo.monitoring.svc.cluster.local:3200"
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+# NEVER commit actual values. Supply via one of:
+#   helm install ... --set secrets.grafanaTokenKey=<token>
+#   a values-secret.yaml excluded from git
+#   External Secrets Operator / Sealed Secrets
+secrets:
+  grafanaTokenKey: ""   # REQUIRED — Grafana service account token
+
+# ─── Ingress ─────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: grafana-agent.local       # add to /etc/hosts pointing to k3s node IP
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # SSE (Server-Sent Events) requires buffering off on the ingress
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+  tls: []
+  # tls:
+  #   - secretName: grafana-agent-tls
+  #     hosts:
+  #       - grafana-agent.local
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+service:
+  backend:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+  frontend:
+    type: ClusterIP   # NodePort only needed if bypassing ingress in dev
+    port: 80
+    targetPort: 80
+
+# ─── Service Account + RBAC ──────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  # name: ""   # auto-generated from chart fullname if empty
+
+# ─── Scheduling ──────────────────────────────────────────────────────────────
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podAnnotations: {}
+
+# ─── Autoscaling (disabled by default) ───────────────────────────────────────
+autoscaling:
+  enabled: false
+  backend:
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  frontend:
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
