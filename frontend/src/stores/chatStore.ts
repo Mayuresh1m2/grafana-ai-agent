@@ -24,24 +24,26 @@ export const useChatStore = defineStore('chat', () => {
 
     // Add user message
     messages.value.push({
-      id:        newId(),
-      role:      'user',
-      content:   query,
-      thinking:  null,
-      artifacts: [],
-      timestamp: new Date(),
-      status:    'complete',
+      id:          newId(),
+      role:        'user',
+      content:     query,
+      thinking:    null,
+      artifacts:   [],
+      suggestions: [],
+      timestamp:   new Date(),
+      status:      'complete',
     })
 
     // Add empty assistant message (will be filled by SSE)
     const assistantMsg: ChatMessage = {
-      id:       newId(),
-      role:     'assistant',
-      content:  '',
-      thinking: { chunks: [], isDone: false, collapsed: false },
-      artifacts: [],
-      timestamp: new Date(),
-      status:    'streaming',
+      id:          newId(),
+      role:        'assistant',
+      content:     '',
+      thinking:    { chunks: [], isDone: false, collapsed: false },
+      artifacts:   [],
+      suggestions: [],
+      timestamp:   new Date(),
+      status:      'streaming',
     }
     messages.value.push(assistantMsg)
     isStreaming.value = true
@@ -131,6 +133,10 @@ export const useChatStore = defineStore('chat', () => {
         repo_path:       event.repo_path,
       }
       msg.artifacts = [...msg.artifacts, artifact]
+      return
+    }
+    if (event.type === 'suggestions') {
+      msg.suggestions = event.items
     }
   }
 

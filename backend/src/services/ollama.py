@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from functools import lru_cache
 
 import httpx
@@ -17,6 +19,32 @@ _SYSTEM_PROMPT_BASE = (
     "Prometheus, Tempo). Be concise, factual, and actionable. When uncertain, "
     "say so rather than guessing."
 )
+
+_SUGGESTIONS_INSTRUCTION = (
+    "\n\nAfter your answer, on its own line, append exactly this (valid JSON array, "
+    "no trailing text):\n"
+    'SUGGESTIONS: ["follow-up question 1?", "follow-up question 2?", "follow-up question 3?"]\n'
+    "The questions should be 2-3 concise things an on-call engineer would naturally investigate next. "
+    "Do not include any text after the SUGGESTIONS line."
+)
+
+
+def parse_suggestions(text: str) -> tuple[str, list[str]]:
+    """Split LLM output into (clean_answer, suggestions_list).
+
+    Looks for a trailing ``SUGGESTIONS: [...]`` line and extracts it.
+    Returns the original text unchanged if the marker is absent or malformed.
+    """
+    match = re.search(r"\nSUGGESTIONS:\s*(\[.*?\])\s*$", text.rstrip(), re.DOTALL)
+    if match:
+        try:
+            items = json.loads(match.group(1))
+            if isinstance(items, list):
+                clean = text[: match.start()].rstrip()
+                return clean, [str(s) for s in items[:3]]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text, []
 
 
 class OllamaService:
@@ -82,10 +110,11 @@ class OllamaService:
         await self._client.aclose()
 
     def _build_system_prompt(self, context: dict[str, str]) -> str:
-        if not context:
-            return _SYSTEM_PROMPT_BASE
-        ctx_lines = "\n".join(f"  {k}: {v}" for k, v in context.items())
-        return f"{_SYSTEM_PROMPT_BASE}\n\nContext provided by the user:\n{ctx_lines}"
+        base = _SYSTEM_PROMPT_BASE
+        if context:
+            ctx_lines = "\n".join(f"  {k}: {v}" for k, v in context.items())
+            base = f"{base}\n\nContext provided by the user:\n{ctx_lines}"
+        return base + _SUGGESTIONS_INSTRUCTION
 
 
 @lru_cache(maxsize=1)

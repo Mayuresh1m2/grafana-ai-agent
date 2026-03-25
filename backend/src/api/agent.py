@@ -1,34 +1,30 @@
-"""Agent query endpoint."""
+"""Agent query endpoint — SSE streaming response."""
 
 from __future__ import annotations
 
-from typing import Annotated
+import json
+from typing import Annotated, AsyncIterator
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from src.models.requests import AgentQueryRequest
-from src.models.responses import AgentQueryResponse
-from src.services.ollama import OllamaService, get_ollama_service
+from src.services.ollama import OllamaService, get_ollama_service, parse_suggestions
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post(
-    "/query",
-    response_model=AgentQueryResponse,
-    summary="Send a query to the AI agent",
-    description=(
-        "Sends a natural-language query to the configured Ollama model. "
-        "Optional context key-value pairs are injected into the system prompt."
-    ),
-    status_code=200,
-)
-async def agent_query(
+def _sse(event: dict) -> str:
+    """Serialise a dict as an SSE data line."""
+    return f"data: {json.dumps(event)}\n\n"
+
+
+async def _stream(
     request: AgentQueryRequest,
-    ollama: Annotated[OllamaService, Depends(get_ollama_service)],
-) -> AgentQueryResponse:
+    ollama: OllamaService,
+) -> AsyncIterator[str]:
     log = logger.bind(
         query_preview=request.query[:80],
         model=request.model,
@@ -37,7 +33,7 @@ async def agent_query(
     log.info("agent_query_received")
 
     try:
-        answer, tokens_used = await ollama.generate(
+        raw_answer, tokens_used = await ollama.generate(
             prompt=request.query,
             context=request.context,
             model=request.model,
@@ -45,15 +41,39 @@ async def agent_query(
         )
     except Exception as exc:
         log.error("agent_query_failed", error=str(exc), exc_info=True)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Upstream Ollama error: {exc}",
-        ) from exc
+        yield _sse({"type": "error", "message": f"Upstream Ollama error: {exc}"})
+        return
 
-    log.info("agent_query_completed", tokens_used=tokens_used)
-    return AgentQueryResponse(
-        answer=answer,
-        query=request.query,
-        model=request.model or ollama.default_model,
-        tokens_used=tokens_used,
+    # Split suggestions marker out of the answer before streaming content
+    clean_answer, suggestions = parse_suggestions(raw_answer)
+
+    log.info("agent_query_completed", tokens_used=tokens_used, suggestions=len(suggestions))
+
+    yield _sse({"type": "content", "chunk": clean_answer})
+
+    if suggestions:
+        yield _sse({"type": "suggestions", "items": suggestions})
+
+    yield _sse({"type": "done"})
+
+
+@router.post(
+    "/query",
+    summary="Send a query to the AI agent (SSE stream)",
+    description=(
+        "Streams the assistant response as Server-Sent Events. "
+        "Event types: content, suggestions, done, error."
+    ),
+)
+async def agent_query(
+    request: AgentQueryRequest,
+    ollama: Annotated[OllamaService, Depends(get_ollama_service)],
+) -> StreamingResponse:
+    return StreamingResponse(
+        _stream(request, ollama),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
     )

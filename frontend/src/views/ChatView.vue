@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useChatStore }    from '@/stores/chatStore'
@@ -70,6 +70,12 @@ function scrollToBottom() {
   const el = scrollEl.value
   if (el) el.scrollTop = el.scrollHeight
 }
+
+const suggestions = computed<string[]>(() => {
+  if (chat.isStreaming) return []
+  const last = chat.messages.at(-1)
+  return (last?.role === 'assistant' && last.status === 'complete') ? last.suggestions : []
+})
 </script>
 
 <template>
@@ -103,6 +109,20 @@ function scrollToBottom() {
             />
           </TransitionGroup>
         </div>
+
+        <!-- Suggestion chips -->
+        <Transition name="chips">
+          <div v-if="suggestions.length" class="suggestions">
+            <button
+              v-for="s in suggestions"
+              :key="s"
+              class="suggestion-chip"
+              @click="sendQuery(s)"
+            >
+              {{ s }}
+            </button>
+          </div>
+        </Transition>
 
         <!-- Input bar -->
         <ChatInput
@@ -173,4 +193,35 @@ function scrollToBottom() {
 /* Message enter animation */
 .msg-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .msg-enter-from   { opacity: 0; transform: translateY(8px); }
+
+/* Suggestion chips */
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.suggestion-chip {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.suggestion-chip:hover {
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text);
+  border-color: var(--accent-blue);
+}
+
+.chips-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.chips-leave-active { transition: opacity 0.1s ease; }
+.chips-enter-from   { opacity: 0; transform: translateY(4px); }
+.chips-leave-to     { opacity: 0; }
 </style>

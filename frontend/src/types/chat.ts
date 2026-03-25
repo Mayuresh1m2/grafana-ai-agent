@@ -5,6 +5,7 @@ export type SSEEventType =
   | 'log_snippet'
   | 'metric'
   | 'code_ref'
+  | 'suggestions'
   | 'done'
   | 'error'
 
@@ -40,12 +41,18 @@ export interface SSECodeRefEvent {
   repo_path?: string
 }
 
+export interface SSESuggestionsEvent {
+  type: 'suggestions'
+  items: string[]
+}
+
 export type SSEEvent =
   | SSEThinkingEvent
   | SSEContentEvent
   | SSELogSnippetEvent
   | SSEMetricEvent
   | SSECodeRefEvent
+  | SSESuggestionsEvent
   | SSEDoneEvent
   | SSEErrorEvent
 
@@ -100,6 +107,7 @@ export interface ChatMessage {
   content: string           // markdown for assistant, plain for user
   thinking: ThinkingState | null
   artifacts: Artifact[]
+  suggestions: string[]     // follow-up question chips
   timestamp: Date
   status: 'complete' | 'streaming' | 'error'
   errorMessage?: string
