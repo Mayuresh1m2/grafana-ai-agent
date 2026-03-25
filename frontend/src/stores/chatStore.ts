@@ -8,9 +8,10 @@ function newId() { return `msg_${++_msgCounter}_${Date.now()}` }
 
 export const useChatStore = defineStore('chat', () => {
   // ── State ────────────────────────────────────────────────────────────────
-  const messages    = ref<ChatMessage[]>([])
-  const isStreaming = ref(false)
-  const error       = ref<string | null>(null)
+  const messages       = ref<ChatMessage[]>([])
+  const isStreaming    = ref(false)
+  const error          = ref<string | null>(null)
+  const sessionExpired = ref(false)
   let   _cancelSSE: (() => void) | null = null
 
   // ── Computed ─────────────────────────────────────────────────────────────
@@ -152,10 +153,13 @@ export const useChatStore = defineStore('chat', () => {
     error.value       = err.message
     isStreaming.value = false
     _cancelSSE        = null
+    if ((err as Error & { code?: string }).code === 'session_expired') {
+      sessionExpired.value = true
+    }
   }
 
   return {
-    messages, isStreaming, error, lastMessage, hasMessages,
+    messages, isStreaming, error, sessionExpired, lastMessage, hasMessages,
     sendQuery, stopStream, retryLastQuery, clearMessages,
   }
 })

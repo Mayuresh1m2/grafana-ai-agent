@@ -42,7 +42,16 @@ class AgentQueryRequest(BaseModel):
 
 
 class GrafanaConnectRequest(BaseModel):
-    """Request body for POST /api/v1/grafana/connect."""
+    """Request body for POST /api/v1/grafana/connect.
+
+    Supports two authentication modes:
+    - **Credentials** (username + password): uses headless Playwright login.
+    - **Cookie relay** (cookie_header): user completes SSO manually in their
+      browser (e.g. Microsoft login) and pastes the raw Cookie header value.
+      The backend validates it immediately against /api/datasources.
+
+    Exactly one mode must be supplied.
+    """
 
     session_id: str = Field(
         ...,
@@ -53,5 +62,24 @@ class GrafanaConnectRequest(BaseModel):
         description="Base URL of the Grafana instance (no trailing slash).",
         examples=["https://grafana.example.com"],
     )
-    username: str = Field(..., description="Grafana username or e-mail.")
-    password: str = Field(..., description="Grafana password.")
+    # ── Credentials mode ──────────────────────────────────────────────────────
+    username: str | None = Field(default=None, description="Grafana username or e-mail.")
+    password: str | None = Field(default=None, description="Grafana password.")
+    # ── Cookie-relay mode ─────────────────────────────────────────────────────
+    cookie_header: str | None = Field(
+        default=None,
+        description=(
+            "Raw Cookie header value copied from the browser after completing "
+            "SSO manually (e.g. 'grafana_session=abc123; grafana_session_expiry=...')."
+        ),
+    )
+
+
+class GrafanaRefreshRequest(BaseModel):
+    """Request body for POST /api/v1/grafana/refresh."""
+
+    session_id: str = Field(..., description="Existing session to refresh.")
+    cookie_header: str = Field(
+        ...,
+        description="Fresh Cookie header value obtained after re-logging in.",
+    )

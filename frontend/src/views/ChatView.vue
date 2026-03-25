@@ -3,10 +3,11 @@ import { ref, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useChatStore }    from '@/stores/chatStore'
-import Sidebar        from '@/components/chat/Sidebar.vue'
-import MessageBubble  from '@/components/chat/MessageBubble.vue'
-import ChatInput      from '@/components/chat/ChatInput.vue'
-import ErrorBoundary  from '@/components/common/ErrorBoundary.vue'
+import Sidebar              from '@/components/chat/Sidebar.vue'
+import MessageBubble        from '@/components/chat/MessageBubble.vue'
+import ChatInput            from '@/components/chat/ChatInput.vue'
+import ErrorBoundary        from '@/components/common/ErrorBoundary.vue'
+import SessionExpiredBanner from '@/components/common/SessionExpiredBanner.vue'
 
 const router  = useRouter()
 const session = useSessionStore()
@@ -62,6 +63,12 @@ function scrollToBottom() {
 
     <div class="chat-view__main">
       <ErrorBoundary>
+        <!-- Session-expired banner -->
+        <SessionExpiredBanner
+          v-if="chat.sessionExpired"
+          @refreshed="chat.sessionExpired = false"
+        />
+
         <!-- Message thread -->
         <div ref="scrollEl" class="chat-view__thread">
           <div v-if="!chat.hasMessages" class="chat-view__empty">

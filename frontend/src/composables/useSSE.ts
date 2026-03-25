@@ -28,7 +28,15 @@ export function useSSE(
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        // Try to read structured error body for session_expired signalling
+        let code: string | undefined
+        try {
+          const body = await response.json()
+          code = typeof body.detail === 'object' ? body.detail?.code : undefined
+        } catch { /* ignore */ }
+        const err = new Error(`HTTP ${response.status}: ${response.statusText}`)
+        if (code) (err as Error & { code: string }).code = code
+        throw err
       }
 
       const reader = response.body?.getReader()

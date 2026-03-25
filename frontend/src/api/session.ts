@@ -32,25 +32,48 @@ export async function checkConnectivity(grafanaUrl: string): Promise<Connectivit
   return res.json()
 }
 
+async function _postConnect(body: Record<string, string>): Promise<GrafanaConnectResult> {
+  const res = await fetch('/api/v1/grafana/connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(typeof detail.detail === 'string' ? detail.detail : `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function connectGrafana(
   grafanaUrl: string,
   username: string,
   password: string,
   sessionId: string,
 ): Promise<GrafanaConnectResult> {
-  const res = await fetch('/api/v1/grafana/connect', {
+  return _postConnect({ session_id: sessionId, grafana_url: grafanaUrl, username, password })
+}
+
+export async function connectGrafanaCookie(
+  grafanaUrl: string,
+  cookieHeader: string,
+  sessionId: string,
+): Promise<GrafanaConnectResult> {
+  return _postConnect({ session_id: sessionId, grafana_url: grafanaUrl, cookie_header: cookieHeader })
+}
+
+export async function refreshGrafanaCookie(
+  sessionId: string,
+  cookieHeader: string,
+): Promise<GrafanaConnectResult> {
+  const res = await fetch('/api/v1/grafana/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: sessionId,
-      grafana_url: grafanaUrl,
-      username,
-      password,
-    }),
+    body: JSON.stringify({ session_id: sessionId, cookie_header: cookieHeader }),
   })
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
-    throw new Error(detail.detail ?? `HTTP ${res.status}`)
+    throw new Error(typeof detail.detail === 'string' ? detail.detail : `HTTP ${res.status}`)
   }
   return res.json()
 }

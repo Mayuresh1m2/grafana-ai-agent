@@ -27,6 +27,27 @@ def _proxy_path(uid: str, backend_path: str) -> str:
     return f"{_DATASOURCE_PROXY.format(uid=uid)}{backend_path}"
 
 
+def _raise_for_status(resp: httpx.Response) -> None:
+    """Like resp.raise_for_status() but converts 401/403 to a structured 401.
+
+    A 401 from Grafana means the session cookie has expired.  We raise an
+    HTTPException with ``code="session_expired"`` so the frontend can prompt
+    the user to re-paste their cookie rather than showing a generic error.
+    """
+    if resp.status_code in (401, 403):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "session_expired",
+                "message": (
+                    "Grafana session has expired. "
+                    "Please re-authenticate via POST /api/v1/grafana/refresh."
+                ),
+            },
+        )
+    resp.raise_for_status()
+
+
 class GrafanaClient:
     """Thin async wrapper around the Grafana REST API + datasource proxy.
 
@@ -110,7 +131,7 @@ class GrafanaClient:
         resp = await self._http.get(
             _proxy_path(uid, "/loki/api/v1/query_range"), params=params
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         result: dict[str, object] = resp.json()
         log.debug("loki_query_done")
         return result
@@ -133,7 +154,7 @@ class GrafanaClient:
             _proxy_path(uid, f"/loki/api/v1/label/{label_name}/values"),
             params=params,
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         data: dict[str, object] = resp.json()
         values: list[str] = data.get("data", [])  # type: ignore[assignment]
         return values
@@ -158,7 +179,7 @@ class GrafanaClient:
         resp = await self._http.get(
             _proxy_path(uid, "/api/v1/query"), params=params
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         result: dict[str, object] = resp.json()
         log.debug("prometheus_query_done")
         return result
@@ -182,7 +203,7 @@ class GrafanaClient:
         resp = await self._http.get(
             _proxy_path(uid, "/api/v1/query_range"), params=params
         )
-        resp.raise_for_status()
+        _raise_for_status(resp)
         result: dict[str, object] = resp.json()
         return result
 
