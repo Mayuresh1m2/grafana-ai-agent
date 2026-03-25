@@ -1,38 +1,12 @@
 import { expect, test } from '@playwright/test'
 
-test.describe('Home page', () => {
-  test('smoke: page loads and shows title', async ({ page }) => {
+test.describe('Root redirect', () => {
+  test('/ redirects to /setup when not configured', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('h1')).toContainText('Grafana AI Agent')
-  })
-
-  test('page has Start chatting link', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.getByRole('link', { name: /start chatting/i })).toBeVisible()
-  })
-
-  test('clicking Start chatting navigates to /chat', async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('link', { name: /start chatting/i }).click()
-    await expect(page).toHaveURL('/chat')
-  })
-
-  test('nav link to Chat works', async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('navigation').getByRole('link', { name: 'Chat' }).click()
-    await expect(page).toHaveURL('/chat')
-  })
-})
-
-test.describe('Chat page', () => {
-  test('smoke: chat page loads', async ({ page }) => {
-    await page.goto('/chat')
-    await expect(page.locator('.query-input')).toBeVisible()
-  })
-
-  test('shows empty state on fresh load', async ({ page }) => {
-    await page.goto('/chat')
-    await expect(page.locator('.empty-state')).toBeVisible()
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    // ChatView redirects to /setup when setupComplete is false
+    await expect(page).toHaveURL('/setup')
   })
 })
 

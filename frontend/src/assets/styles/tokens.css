@@ -1,0 +1,89 @@
+/* ─── Design Tokens ────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ── Backgrounds ─────────────────────────────────────────────────────────── */
+  --bg:        #0d0f14;
+  --surface:   #13161e;
+  --surface-2: #1a1d27;
+  --surface-3: #252836;
+  --surface-4: #2e3245;
+
+  /* ── Borders ─────────────────────────────────────────────────────────────── */
+  --border:        #2a2d3a;
+  --border-subtle: #1e2130;
+  --border-focus:  var(--accent-blue);
+
+  /* ── Text ────────────────────────────────────────────────────────────────── */
+  --text:       #e2e4f0;
+  --text-muted: #8b8fa8;
+  --text-dim:   #5c6070;
+
+  /* ── Accent Blue ─────────────────────────────────────────────────────────── */
+  --accent-blue:        #4a9eff;
+  --accent-blue-hover:  #6ab0ff;
+  --accent-blue-active: #3b8fee;
+  --accent-blue-dim:    rgba(74, 158, 255, 0.12);
+  --accent-blue-border: rgba(74, 158, 255, 0.30);
+
+  /* ── Status colors ───────────────────────────────────────────────────────── */
+  --status-error:     #ff4d6a;
+  --status-error-dim: rgba(255,  77, 106, 0.12);
+  --status-warn:      #ffb347;
+  --status-warn-dim:  rgba(255, 179,  71, 0.12);
+  --status-ok:        #4cdf80;
+  --status-ok-dim:    rgba( 76, 223, 128, 0.12);
+
+  /* ── Thinking / agent color ──────────────────────────────────────────────── */
+  --thinking-color:    #b57bee;
+  --thinking-dim:      rgba(181, 123, 238, 0.12);
+
+  /* ── Typography ──────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* ── Radius ──────────────────────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius:    8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ── Shadows ─────────────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow:    0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+
+  /* ── Transitions ─────────────────────────────────────────────────────────── */
+  --t:     150ms ease;
+  --t-md:  250ms ease;
+  --t-lg:  350ms ease;
+
+  /* ── Layout ──────────────────────────────────────────────────────────────── */
+  --sidebar-width: 260px;
+  --header-height: 52px;
+  --input-height:  56px;
+}
+
+/* ─── Light mode overrides ─────────────────────────────────────────────────── */
+[data-theme='light'] {
+  --bg:            #f4f6fa;
+  --surface:       #ffffff;
+  --surface-2:     #f0f2f6;
+  --surface-3:     #e8eaef;
+  --surface-4:     #dee1e8;
+  --border:        #d8dbe6;
+  --border-subtle: #eceef4;
+  --text:          #13161e;
+  --text-muted:    #555870;
+  --text-dim:      #9499b0;
+  --accent-blue-dim: rgba(74, 158, 255, 0.08);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow:    0 4px 12px rgba(0,0,0,0.10);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+}
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 6px; height: 6px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: var(--surface-3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover  { background: var(--surface-4); }

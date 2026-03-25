@@ -4,15 +4,15 @@ import type { RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    name: 'home',
-    component: () => import('@/views/HomeView.vue'),
-    meta: { title: 'Home' },
-  },
-  {
-    path: '/chat',
     name: 'chat',
     component: () => import('@/views/ChatView.vue'),
-    meta: { title: 'Chat' },
+    meta: { title: 'Investigation' },
+  },
+  {
+    path: '/setup',
+    name: 'setup',
+    component: () => import('@/views/SessionSetupView.vue'),
+    meta: { title: 'Session Setup' },
   },
   {
     // Catch-all 404

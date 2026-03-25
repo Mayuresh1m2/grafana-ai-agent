@@ -1,157 +1,154 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useAgentStore } from '@/stores'
-import AgentChat from '@/components/AgentChat.vue'
-import ModelSelector from '@/components/ModelSelector.vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useChatStore }    from '@/stores/chatStore'
+import Sidebar        from '@/components/chat/Sidebar.vue'
+import MessageBubble  from '@/components/chat/MessageBubble.vue'
+import ChatInput      from '@/components/chat/ChatInput.vue'
+import ErrorBoundary  from '@/components/common/ErrorBoundary.vue'
 
-const agentStore = useAgentStore()
-const inputQuery = ref('')
+const router  = useRouter()
+const session = useSessionStore()
+const chat    = useChatStore()
 
-async function handleSubmit(): Promise<void> {
-  const query = inputQuery.value.trim()
-  if (!query || agentStore.isLoading) return
-  inputQuery.value = ''
-  await agentStore.sendQuery(query)
+const scrollEl = ref<HTMLElement | null>(null)
+
+// Guard: redirect to setup if not ready
+onMounted(() => {
+  if (!session.setupComplete) router.replace('/setup')
+})
+
+function sessionPayload() {
+  return {
+    session_id:  session.sessionId,
+    grafana_url: session.grafanaUrl,
+    namespace:   session.namespace,
+    environment: session.environment,
+    services:    session.services,
+    repo_path:   session.repoPath,
+  }
 }
 
-function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault()
-    void handleSubmit()
-  }
+function sendQuery(query: string) {
+  chat.sendQuery(query, sessionPayload())
+}
+
+function handleQuickAction(q: string) {
+  sendQuery(q)
+}
+
+// Auto-scroll to bottom when messages change
+watch(
+  () => chat.messages.length,
+  () => nextTick(scrollToBottom),
+)
+
+// Also scroll while streaming content grows
+watch(
+  () => chat.messages.at(-1)?.content,
+  () => { if (chat.isStreaming) nextTick(scrollToBottom) },
+)
+
+function scrollToBottom() {
+  const el = scrollEl.value
+  if (el) el.scrollTop = el.scrollHeight
 }
 </script>
 
 <template>
   <div class="chat-view">
-    <div class="chat-toolbar">
-      <ModelSelector />
-      <button
-        class="clear-btn"
-        :disabled="!agentStore.hasMessages"
-        title="Clear conversation"
-        @click="agentStore.clearMessages()"
-      >
-        Clear
-      </button>
+    <Sidebar class="chat-view__sidebar" @quick-action="handleQuickAction" />
+
+    <div class="chat-view__main">
+      <ErrorBoundary>
+        <!-- Message thread -->
+        <div ref="scrollEl" class="chat-view__thread">
+          <div v-if="!chat.hasMessages" class="chat-view__empty">
+            <p class="chat-view__empty-title">OnCall AI</p>
+            <p class="chat-view__empty-sub">
+              Ask about your services, metrics, or logs. I have access to
+              <strong>{{ session.namespace }}</strong> in
+              <strong>{{ session.environment }}</strong>.
+            </p>
+          </div>
+
+          <TransitionGroup name="msg" tag="div" class="chat-view__messages">
+            <MessageBubble
+              v-for="msg in chat.messages"
+              :key="msg.id"
+              :message="msg"
+            />
+          </TransitionGroup>
+        </div>
+
+        <!-- Input bar -->
+        <ChatInput
+          :is-streaming="chat.isStreaming"
+          @submit="sendQuery"
+          @stop="chat.stopStream"
+        />
+      </ErrorBoundary>
     </div>
-
-    <AgentChat :messages="agentStore.messages" :is-loading="agentStore.isLoading" />
-
-    <div v-if="agentStore.error" role="alert" class="error-banner">
-      {{ agentStore.error }}
-    </div>
-
-    <form class="input-row" @submit.prevent="handleSubmit">
-      <textarea
-        v-model="inputQuery"
-        class="query-input"
-        placeholder="Ask about your metrics, logs, or traces… (Enter to send, Shift+Enter for newline)"
-        rows="2"
-        :disabled="agentStore.isLoading"
-        aria-label="Query input"
-        @keydown="handleKeydown"
-      />
-      <button type="submit" class="send-btn" :disabled="agentStore.isLoading || !inputQuery.trim()">
-        {{ agentStore.isLoading ? 'Thinking…' : 'Send' }}
-      </button>
-    </form>
   </div>
 </template>
 
 <style scoped>
 .chat-view {
   display: flex;
-  flex-direction: column;
-  height: calc(100vh - 96px);
-  gap: 0.75rem;
+  height: 100%;
+  overflow: hidden;
 }
 
-.chat-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  justify-content: flex-end;
-}
-
-.clear-btn {
-  padding: 0.35rem 0.9rem;
-  background: transparent;
-  color: #9ca3af;
-  border: 1px solid #374151;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.clear-btn:hover:not(:disabled) {
-  color: #f3f4f6;
-  border-color: #6b7280;
-}
-
-.clear-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.error-banner {
-  padding: 0.6rem 1rem;
-  background: #7f1d1d;
-  color: #fecaca;
-  border-radius: 6px;
-  font-size: 0.875rem;
-}
-
-.input-row {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-end;
-}
-
-.query-input {
+.chat-view__main {
   flex: 1;
-  padding: 0.65rem 1rem;
-  border: 1px solid #374151;
-  border-radius: 8px;
-  background: #1f2937;
-  color: #f3f4f6;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.chat-view__thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  scroll-behavior: smooth;
+}
+
+.chat-view__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.chat-view__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: var(--text-muted);
+}
+
+.chat-view__empty-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.chat-view__empty-sub {
   font-size: 0.9rem;
-  font-family: inherit;
-  resize: none;
-  line-height: 1.5;
-  transition: border-color 0.15s;
+  max-width: 400px;
+  line-height: 1.6;
 }
 
-.query-input:focus {
-  outline: none;
-  border-color: #f97316;
-}
-
-.query-input:disabled {
-  opacity: 0.6;
-}
-
-.send-btn {
-  padding: 0.65rem 1.5rem;
-  background: #f97316;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  transition: background 0.15s;
-  align-self: flex-end;
-}
-
-.send-btn:hover:not(:disabled) {
-  background: #ea6c0a;
-}
-
-.send-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* Message enter animation */
+.msg-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.msg-enter-from   { opacity: 0; transform: translateY(8px); }
 </style>
