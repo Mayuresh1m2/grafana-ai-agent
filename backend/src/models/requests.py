@@ -73,6 +73,15 @@ class GrafanaConnectRequest(BaseModel):
             "SSO manually (e.g. 'grafana_session=abc123; grafana_session_expiry=...')."
         ),
     )
+    # ── Service account token mode ────────────────────────────────────────────
+    service_token: str | None = Field(
+        default=None,
+        description=(
+            "Grafana service account token (starts with 'glsa_' on Grafana ≥ 9). "
+            "Sent as 'Authorization: Bearer <token>' on every request."
+        ),
+        examples=["glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"],
+    )
     # ── Azure CLI mode ────────────────────────────────────────────────────────
     azure_scope: str | None = Field(
         default=None,

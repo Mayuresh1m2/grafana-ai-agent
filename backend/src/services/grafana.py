@@ -74,6 +74,8 @@ class GrafanaClient:
         """Async factory — resolves auth credentials before building the client."""
         if session.azure_scope:
             auth_header = await cls._azure_bearer(session.azure_scope)
+        elif session.service_token:
+            auth_header = {"Authorization": f"Bearer {session.service_token}"}
         else:
             auth_header = {"Cookie": session.cookie_header()}
         return cls(session, auth_header)

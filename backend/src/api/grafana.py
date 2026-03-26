@@ -85,11 +85,12 @@ async def connect(
     has_credentials = bool(body.username and body.password)
     has_cookie      = bool(body.cookie_header)
     has_azure       = bool(body.azure_scope)
+    has_token       = bool(body.service_token)
 
-    if not has_credentials and not has_cookie and not has_azure:
+    if not has_credentials and not has_cookie and not has_azure and not has_token:
         raise HTTPException(
             status_code=422,
-            detail="Provide one of: (username + password), cookie_header, or azure_scope.",
+            detail="Provide one of: (username + password), cookie_header, service_token, or azure_scope.",
         )
 
     # ── Azure CLI path — no cookie; token fetched per-request ─────────────────
@@ -125,6 +126,40 @@ async def connect(
             cookies={},
             datasources=datasources,
             azure_scope=body.azure_scope,
+        ))
+        return GrafanaConnectResponse(
+            session_id=body.session_id,
+            grafana_url=body.grafana_url,
+            datasources=datasources,
+        )
+
+    # ── Service account token path ────────────────────────────────────────────
+    if has_token:
+        log.info("grafana_connect_service_token")
+        tentative = GrafanaSession(
+            session_id=body.session_id,
+            grafana_url=body.grafana_url,
+            cookies={},
+            datasources=[],
+            service_token=body.service_token,
+        )
+        try:
+            client = await GrafanaClient.create(tentative)
+            datasources = await client.fetch_datasources_from_api()
+            await client.aclose()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("grafana_token_connect_failed", error=str(exc))
+            raise HTTPException(status_code=401, detail=f"Token auth failed: {exc}") from exc
+
+        log.info("grafana_datasources_discovered", count=len(datasources))
+        await store.put(GrafanaSession(
+            session_id=body.session_id,
+            grafana_url=body.grafana_url,
+            cookies={},
+            datasources=datasources,
+            service_token=body.service_token,
         ))
         return GrafanaConnectResponse(
             session_id=body.session_id,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { connectGrafana, connectGrafanaAzureCli, connectGrafanaToken } from '@/api/session'
+import { connectGrafana, connectGrafanaAzureCli, connectGrafanaToken, connectGrafanaCookie } from '@/api/session'
 
 type Mode = 'token' | 'sso' | 'credentials' | 'azure-cli'
 const session = useSessionStore()
@@ -9,7 +9,7 @@ const session = useSessionStore()
 const mode         = ref<Mode>('token')
 const serviceToken = ref('')
 const azureScope   = ref('')
-const ssoToken     = ref('')
+const ssoToken      = ref('')
 const ssoConnecting = ref(false)
 const username    = ref('')
 const password    = ref('')
@@ -48,14 +48,14 @@ async function submitToken() {
   }
 }
 
-// ── SSO token submit ──────────────────────────────────────────────────────────
+// ── SSO cookie submit ─────────────────────────────────────────────────────────
 async function submitSsoToken() {
   if (!ssoToken.value.trim()) return
   error.value = null
   ssoConnecting.value = true
   ensureSessionId()
   try {
-    await connectGrafanaToken(session.grafanaUrl, ssoToken.value.trim(), session.sessionId as string)
+    await connectGrafanaCookie(session.grafanaUrl, ssoToken.value.trim(), session.sessionId as string)
     session.authStatus = 'complete'
     session.goToStep(3)
   } catch (e) {
@@ -247,7 +247,7 @@ function back() {
     <!-- ── SSO flow ── -->
     <template v-else-if="mode === 'sso'">
       <p class="step-panel__desc">
-        Open Grafana to log in via Microsoft SSO, then copy your API token and paste it below.
+        Open Grafana to log in via Microsoft SSO, then copy the session cookie and paste it below.
       </p>
 
       <div class="step-panel__actions">
@@ -257,23 +257,23 @@ function back() {
       </div>
 
       <div class="cookie-guide">
-        <p class="cookie-guide__title">After logging in, get your API token:</p>
+        <p class="cookie-guide__title">After logging in, copy your session cookie:</p>
         <ol class="cookie-guide__steps">
-          <li>In the Grafana tab, click your avatar (bottom-left) → <strong>Profile</strong></li>
-          <li>Go to the <strong>API keys</strong> or <strong>Service accounts</strong> section</li>
-          <li>Create a new token (or copy an existing one)</li>
-          <li>Paste the token in the box below</li>
+          <li>In the Grafana tab open DevTools — press <kbd>F12</kbd></li>
+          <li>Go to the <strong>Network</strong> tab and refresh the page</li>
+          <li>Click any request to <code>{{ session.grafanaUrl }}</code></li>
+          <li>Under <strong>Headers → Request Headers</strong> find <code>Cookie</code></li>
+          <li>Copy the value and paste it in the box below</li>
         </ol>
       </div>
 
       <label class="field">
-        <span class="field__label">API token</span>
-        <input
+        <span class="field__label">Cookie header value</span>
+        <textarea
           v-model="ssoToken"
-          type="password"
+          rows="3"
           class="field__input field__input--mono"
-          placeholder="glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-          autocomplete="off"
+          placeholder="grafana_session=abc123; grafana_session_expiry=…"
           :disabled="ssoConnecting"
         />
       </label>
