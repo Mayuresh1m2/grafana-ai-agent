@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from src.models.requests import ReportRequest
-from src.services.ollama import OllamaService, get_ollama_service
+from src.services.llm.factory import get_llm_provider
+from src.services.llm.base import LLMProvider
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -86,14 +87,14 @@ def _sse(event: dict) -> str:
 
 async def _stream_report(
     request: ReportRequest,
-    ollama: OllamaService,
+    llm: LLMProvider,
 ) -> AsyncIterator[str]:
     log = logger.bind(turns=len(request.conversation), model=request.model)
     log.info("report_generate_start")
 
     prompt = _build_prompt(request)
     try:
-        async for token in ollama.generate_stream(
+        async for token in llm.stream(
             prompt=prompt,
             system=_REPORT_SYSTEM,
             model=request.model,
@@ -120,10 +121,10 @@ async def _stream_report(
 )
 async def generate_report(
     request: ReportRequest,
-    ollama: Annotated[OllamaService, Depends(get_ollama_service)],
+    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
 ) -> StreamingResponse:
     return StreamingResponse(
-        _stream_report(request, ollama),
+        _stream_report(request, llm),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

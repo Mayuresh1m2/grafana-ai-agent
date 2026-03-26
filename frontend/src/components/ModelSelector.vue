@@ -1,9 +1,24 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { useAgentStore } from '@/stores'
 
 const agentStore = useAgentStore()
+const models = ref<string[]>([])
 
-const MODELS: string[] = ['llama3', 'llama3:8b', 'mistral', 'phi3', 'gemma2']
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/v1/llm/models')
+    if (res.ok) {
+      const data = await res.json()
+      models.value = data.models
+      if (!agentStore.selectedModel && data.default_model) {
+        agentStore.setModel(data.default_model)
+      }
+    }
+  } catch {
+    // fall back to empty — user can still type a model name
+  }
+})
 </script>
 
 <template>
@@ -15,7 +30,7 @@ const MODELS: string[] = ['llama3', 'llama3:8b', 'mistral', 'phi3', 'gemma2']
       class="select"
       @change="agentStore.setModel(($event.target as HTMLSelectElement).value)"
     >
-      <option v-for="model in MODELS" :key="model" :value="model">
+      <option v-for="model in models" :key="model" :value="model">
         {{ model }}
       </option>
     </select>
@@ -29,11 +44,7 @@ const MODELS: string[] = ['llama3', 'llama3:8b', 'mistral', 'phi3', 'gemma2']
   gap: 0.5rem;
   font-size: 0.8rem;
 }
-
-.label-text {
-  color: #6b7280;
-}
-
+.label-text { color: #6b7280; }
 .select {
   background: #1f2937;
   color: #e5e7eb;
@@ -43,9 +54,5 @@ const MODELS: string[] = ['llama3', 'llama3:8b', 'mistral', 'phi3', 'gemma2']
   font-size: 0.8rem;
   cursor: pointer;
 }
-
-.select:focus {
-  outline: none;
-  border-color: #f97316;
-}
+.select:focus { outline: none; border-color: #f97316; }
 </style>

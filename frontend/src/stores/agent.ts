@@ -9,7 +9,7 @@ export const useAgentStore = defineStore('agent', () => {
   const messages = ref<ChatMessage[]>([])
   const isLoading = ref(false)
   const error = ref<string | null>(null)
-  const selectedModel = ref<string>('llama3')
+  const selectedModel = ref<string>('')
 
   // ── Getters ────────────────────────────────────────────────────────────────
   const hasMessages = computed(() => messages.value.length > 0)

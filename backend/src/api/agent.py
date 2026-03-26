@@ -11,7 +11,9 @@ from fastapi.responses import StreamingResponse
 from src.models.requests import AgentQueryRequest
 from src.services.agent_tools import TOOLS, execute_tool
 from src.services.grafana import GrafanaClient
-from src.services.ollama import OllamaService, get_ollama_service, parse_suggestions
+from src.services.llm.factory import get_llm_provider
+from src.services.llm.base import LLMProvider
+from src.services.ollama import parse_suggestions
 from src.services.session_store import SessionStore, get_session_store
 
 logger = structlog.get_logger(__name__)
@@ -41,7 +43,7 @@ def _build_system(context: dict[str, str]) -> str:
 
 async def _run_agent(
     request: AgentQueryRequest,
-    ollama: OllamaService,
+    llm: LLMProvider,
     store: SessionStore,
 ) -> AsyncIterator[str]:
     log = logger.bind(session_id=request.session_id, query_preview=request.query[:80])
@@ -73,7 +75,7 @@ async def _run_agent(
         for round_num in range(_MAX_TOOL_ROUNDS):
             log.info("agent_llm_call", round=round_num, message_count=len(messages))
 
-            msg = await ollama.chat(
+            msg = await llm.chat(
                 messages,
                 tools=tools,
                 model=request.model,
@@ -130,7 +132,7 @@ async def _run_agent(
 
         # Exhausted rounds — get final answer without tools
         log.warning("agent_max_rounds_reached", rounds=_MAX_TOOL_ROUNDS)
-        msg = await ollama.chat(messages, tools=None, model=request.model)
+        msg = await llm.chat(messages, tools=None, model=request.model)
         content = msg.get("content") or ""  # type: ignore[assignment]
         log.info("agent_final_answer_after_max_rounds", content=content)
         clean, suggestions = parse_suggestions(content)
@@ -158,11 +160,11 @@ async def _run_agent(
 )
 async def agent_query(
     request: AgentQueryRequest,
-    ollama:  Annotated[OllamaService,  Depends(get_ollama_service)],
-    store:   Annotated[SessionStore,   Depends(get_session_store)],
+    llm:   Annotated[LLMProvider,  Depends(get_llm_provider)],
+    store: Annotated[SessionStore, Depends(get_session_store)],
 ) -> StreamingResponse:
     return StreamingResponse(
-        _run_agent(request, ollama, store),
+        _run_agent(request, llm, store),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

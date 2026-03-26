@@ -1,34 +1,33 @@
-"""LLM status probe endpoint."""
-
+"""LLM provider info endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.llm.client import OllamaModel, get_ollama_client
+from src.config import get_settings
+from src.services.llm.base import LLMProvider
+from src.services.llm.factory import get_llm_provider
 
 router = APIRouter()
 
 
-class LLMStatusResponse(BaseModel):
-    """Response model for GET /api/v1/llm/status."""
-
-    ollama_reachable: bool
-    base_url: str
-    available_models: list[str]
+class ModelsResponse(BaseModel):
+    provider: str
+    default_model: str
+    models: list[str]
 
 
-@router.get("/status", response_model=LLMStatusResponse)
-async def llm_status() -> LLMStatusResponse:
-    """Probe the Ollama service and return reachability status.
-
-    Always returns 200 — callers should inspect ``ollama_reachable`` to
-    determine whether the LLM back-end is usable.
-    """
-    client = get_ollama_client()
-    reachable = await client.health_check()
-    return LLMStatusResponse(
-        ollama_reachable=reachable,
-        base_url=client._base_url,
-        available_models=[m.value for m in OllamaModel],
+@router.get("/models", response_model=ModelsResponse)
+async def list_models(
+    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> ModelsResponse:
+    """Return available models for the active provider."""
+    settings = get_settings()
+    models = await llm.list_models()
+    return ModelsResponse(
+        provider=settings.llm_provider,
+        default_model=llm.default_model,
+        models=models,
     )

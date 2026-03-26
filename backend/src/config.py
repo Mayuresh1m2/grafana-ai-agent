@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3"
     ollama_timeout: float = Field(default=120.0, gt=0)
 
+    # ── LLM provider ─────────────────────────────────────────────────────────
+    llm_provider: str = "ollama"          # "ollama" | "anthropic"
+
+    # ── Anthropic ────────────────────────────────────────────────────────────
+    anthropic_api_key: str = Field(default="", repr=False)
+    anthropic_model: str = "claude-opus-4-6"
+
     # ── Grafana ──────────────────────────────────────────────────────────────
     grafana_base_url: str = "http://localhost:3000"
     grafana_api_key: str = Field(default="", repr=False)
