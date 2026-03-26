@@ -62,7 +62,8 @@ export const useSessionStore = defineStore('session', () => {
 
   function confirmSetup() {
     setupComplete.value = true
-    sessionId.value = `session_${Date.now()}`
+    // Keep the sessionId already set during the Grafana connect call — do not overwrite it
+    if (!sessionId.value) sessionId.value = `session_${Date.now()}`
   }
 
   function resetSetup() {
