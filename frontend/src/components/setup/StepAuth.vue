@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { connectGrafana, connectGrafanaCookie, connectGrafanaAzureCli } from '@/api/session'
+import { connectGrafana, connectGrafanaAzureCli, connectGrafanaToken } from '@/api/session'
 
-type Mode = 'sso' | 'credentials' | 'azure-cli'
+type Mode = 'token' | 'sso' | 'credentials' | 'azure-cli'
 type SsoPhase = 'idle' | 'popup-open' | 'awaiting-cookie' | 'connecting' | 'done'
 
 const session = useSessionStore()
 
-const mode        = ref<Mode>('azure-cli')  // default to Azure CLI for local use
+const mode        = ref<Mode>('token')
+const serviceToken = ref('')
 const azureScope  = ref('')
 const ssoPhase    = ref<SsoPhase>('idle')
-const cookieInput = ref('')
+const ssoToken = ref('')
 const username    = ref('')
 const password    = ref('')
 const connecting  = ref(false)
@@ -57,14 +58,32 @@ function ensureSessionId() {
   if (!session.sessionId) session.sessionId = `session_${Date.now()}`
 }
 
-// ── SSO cookie submit ─────────────────────────────────────────────────────────
-async function submitCookie() {
-  if (!cookieInput.value.trim()) return
+// ── Service account token submit ──────────────────────────────────────────────
+async function submitToken() {
+  if (!serviceToken.value.trim()) return
+  error.value = null
+  connecting.value = true
+  ensureSessionId()
+  try {
+    await connectGrafanaToken(session.grafanaUrl, serviceToken.value.trim(), session.sessionId as string)
+    session.authStatus = 'complete'
+    session.goToStep(3)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    session.authStatus = 'failed'
+  } finally {
+    connecting.value = false
+  }
+}
+
+// ── SSO token submit ──────────────────────────────────────────────────────────
+async function submitSsoToken() {
+  if (!ssoToken.value.trim()) return
   error.value = null
   ssoPhase.value = 'connecting'
   ensureSessionId()
   try {
-    await connectGrafanaCookie(session.grafanaUrl, cookieInput.value.trim(), session.sessionId as string)
+    await connectGrafanaToken(session.grafanaUrl, ssoToken.value.trim(), session.sessionId as string)
     session.authStatus = 'complete'
     ssoPhase.value = 'done'
     session.goToStep(3)
@@ -121,7 +140,7 @@ function resetSso() {
   stopPoll()
   popup?.close()
   ssoPhase.value = 'idle'
-  cookieInput.value = ''
+  ssoToken.value = ''
   error.value = null
 }
 </script>
@@ -132,6 +151,12 @@ function resetSso() {
 
     <!-- Mode toggle -->
     <div class="mode-tabs">
+      <button
+        :class="['mode-tab', { active: mode === 'token' }]"
+        @click="mode = 'token'"
+      >
+        Service Account Token
+      </button>
       <button
         :class="['mode-tab', { active: mode === 'azure-cli' }]"
         @click="mode = 'azure-cli'"
@@ -152,8 +177,53 @@ function resetSso() {
       </button>
     </div>
 
+    <!-- ── Service Account Token flow ── -->
+    <template v-if="mode === 'token'">
+      <p class="step-panel__desc">
+        Paste a Grafana service account token. Tokens start with <code>glsa_</code>
+        (Grafana ≥ 9) or <code>eyJ</code> (older API keys).
+      </p>
+
+      <form class="auth-form" @submit.prevent="submitToken">
+        <label class="field">
+          <span class="field__label">Service account token</span>
+          <input
+            v-model="serviceToken"
+            type="password"
+            class="field__input field__input--mono"
+            placeholder="glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            autocomplete="off"
+            :disabled="connecting"
+          />
+          <span class="field__hint">
+            Create one in Grafana → Administration → Service accounts.
+          </span>
+        </label>
+
+        <div v-if="connecting" class="status-card">
+          <span class="spinner" aria-label="Connecting…" />
+          <span class="status-card__title">Validating token…</span>
+        </div>
+
+        <p v-if="error" class="status-error">{{ error }}</p>
+
+        <div class="step-panel__nav">
+          <button type="button" class="btn-ghost" :disabled="connecting" @click="back">
+            Back
+          </button>
+          <button
+            type="submit"
+            class="btn-primary"
+            :disabled="connecting || !serviceToken.trim()"
+          >
+            {{ connecting ? 'Connecting…' : 'Connect' }}
+          </button>
+        </div>
+      </form>
+    </template>
+
     <!-- ── Azure CLI flow ── -->
-    <template v-if="mode === 'azure-cli'">
+    <template v-else-if="mode === 'azure-cli'">
       <p class="step-panel__desc">
         Uses your existing <code>az login</code> session — no browser popup needed.
         The backend fetches and auto-refreshes the Azure AD token via
@@ -234,26 +304,26 @@ function resetSso() {
         <button class="btn-ghost btn--sm" @click="iLoggedIn">I'm logged in</button>
       </div>
 
-      <!-- Step 3: paste cookie -->
+      <!-- Step 3: paste token -->
       <template v-else-if="ssoPhase === 'awaiting-cookie' || ssoPhase === 'connecting'">
         <div class="cookie-guide">
-          <p class="cookie-guide__title">Copy the session cookie from the Grafana tab:</p>
+          <p class="cookie-guide__title">Copy your API token from Grafana:</p>
           <ol class="cookie-guide__steps">
-            <li>In the Grafana browser tab, open DevTools &mdash; press <kbd>F12</kbd></li>
-            <li>Go to the <strong>Network</strong> tab and refresh the page</li>
-            <li>Click any request to <code>{{ session.grafanaUrl }}</code></li>
-            <li>In <strong>Headers → Request Headers</strong>, find <code>Cookie</code></li>
-            <li>Right-click → <em>Copy value</em> and paste below</li>
+            <li>In the Grafana tab, click your avatar (bottom-left) → <strong>Profile</strong></li>
+            <li>Go to the <strong>API keys</strong> or <strong>Service accounts</strong> section</li>
+            <li>Create a new token (or copy an existing one)</li>
+            <li>Paste the token in the box below</li>
           </ol>
         </div>
 
         <label class="field">
-          <span class="field__label">Cookie header value</span>
-          <textarea
-            v-model="cookieInput"
-            rows="3"
+          <span class="field__label">API token</span>
+          <input
+            v-model="ssoToken"
+            type="password"
             class="field__input field__input--mono"
-            placeholder="grafana_session=abc123; grafana_session_expiry=…"
+            placeholder="glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            autocomplete="off"
             :disabled="ssoPhase === 'connecting'"
           />
         </label>
@@ -266,8 +336,8 @@ function resetSso() {
           </button>
           <button
             class="btn-primary"
-            :disabled="!cookieInput.trim() || ssoPhase === 'connecting'"
-            @click="submitCookie"
+            :disabled="!ssoToken.trim() || ssoPhase === 'connecting'"
+            @click="submitSsoToken"
           >
             {{ ssoPhase === 'connecting' ? 'Validating…' : 'Connect' }}
           </button>
