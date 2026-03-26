@@ -45,26 +45,34 @@ async def _run_agent(
     store: SessionStore,
 ) -> AsyncIterator[str]:
     log = logger.bind(session_id=request.session_id, query_preview=request.query[:80])
-    log.info("agent_query_start")
+    log.info("agent_query_start", query=request.query, model=request.model, context=request.context)
 
     # Resolve Grafana session
     session = None
     if request.session_id:
         session = await store.get(request.session_id)
+        log.info("agent_session_resolved", found=session is not None, grafana_url=session.grafana_url if session else None)
+    else:
+        log.warning("agent_no_session_id", detail="No session_id provided — Grafana tools will be unavailable")
 
     client: GrafanaClient | None = None
     if session:
         client = await GrafanaClient.create(session)
 
     tools = TOOLS if client else None
+    system_prompt = _build_system(request.context or {})
 
     messages: list[dict] = [
-        {"role": "system", "content": _build_system(request.context or {})},
+        {"role": "system", "content": system_prompt},
         {"role": "user",   "content": request.query},
     ]
 
+    log.debug("agent_prompt_built", system_prompt=system_prompt, tools_enabled=tools is not None)
+
     try:
         for round_num in range(_MAX_TOOL_ROUNDS):
+            log.info("agent_llm_call", round=round_num, message_count=len(messages))
+
             msg = await ollama.chat(
                 messages,
                 tools=tools,
@@ -77,13 +85,18 @@ async def _run_agent(
             if not tool_calls:
                 # Final answer — stream it
                 content: str = msg.get("content") or ""  # type: ignore[assignment]
+                log.info("agent_final_answer", round=round_num, content_length=len(content), content=content)
                 clean, suggestions = parse_suggestions(content)
                 yield _sse({"type": "content", "chunk": clean})
                 if suggestions:
+                    log.debug("agent_suggestions", suggestions=suggestions)
                     yield _sse({"type": "suggestions", "items": suggestions})
                 log.info("agent_query_done", rounds=round_num + 1)
                 yield _sse({"type": "done"})
                 return
+
+            log.info("agent_tool_calls_selected", round=round_num, count=len(tool_calls),
+                     tools=[c.get("function", {}).get("name") for c in tool_calls])
 
             # Append assistant turn with tool calls
             messages.append({
@@ -100,6 +113,7 @@ async def _run_agent(
                 args: dict = raw_args if isinstance(raw_args, dict) else {}
 
                 args_str = ", ".join(f"{k}={v}" for k, v in args.items()) if args else ""
+                log.info("agent_tool_executing", tool=name, args=args)
                 yield _sse({"type": "thinking", "chunk": f"→ {name}({args_str})\n"})
 
                 if client:
@@ -107,15 +121,18 @@ async def _run_agent(
                         result = await execute_tool(name, args, client)
                     except Exception as exc:
                         result = f"Tool error: {exc}"
+                        log.error("agent_tool_error", tool=name, args=args, error=str(exc), exc_info=True)
                 else:
                     result = "No Grafana session — connect first."
 
-                log.info("tool_executed", tool=name, result_len=len(result))
+                log.info("agent_tool_result", tool=name, result_length=len(result), result=result)
                 messages.append({"role": "tool", "content": result})
 
         # Exhausted rounds — get final answer without tools
+        log.warning("agent_max_rounds_reached", rounds=_MAX_TOOL_ROUNDS)
         msg = await ollama.chat(messages, tools=None, model=request.model)
         content = msg.get("content") or ""  # type: ignore[assignment]
+        log.info("agent_final_answer_after_max_rounds", content=content)
         clean, suggestions = parse_suggestions(content)
         yield _sse({"type": "content", "chunk": clean})
         if suggestions:

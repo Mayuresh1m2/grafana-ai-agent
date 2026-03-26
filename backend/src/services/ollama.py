@@ -116,10 +116,33 @@ class OllamaService:
         }
         if tools:
             payload["tools"] = tools
+
+        tool_names = [t["function"]["name"] for t in (tools or [])]
+        logger.debug(
+            "ollama_chat_request",
+            model=effective_model,
+            temperature=temperature,
+            message_count=len(messages),
+            tools_available=tool_names,
+            messages=messages,
+        )
+
         response = await self._client.post("/api/chat", json=payload)
         response.raise_for_status()
         data: dict[str, object] = response.json()
         msg: dict = data.get("message", {})  # type: ignore[assignment]
+
+        tool_calls = msg.get("tool_calls") or []
+        logger.debug(
+            "ollama_chat_response",
+            model=effective_model,
+            has_tool_calls=bool(tool_calls),
+            tool_calls=tool_calls,
+            content_preview=(str(msg.get("content") or "")[:200] or None),
+            eval_count=data.get("eval_count"),
+            prompt_eval_count=data.get("prompt_eval_count"),
+        )
+
         return msg
 
     async def list_models(self) -> list[str]:
