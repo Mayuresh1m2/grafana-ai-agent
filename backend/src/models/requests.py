@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field, HttpUrl
 class AgentQueryRequest(BaseModel):
     """Request body for POST /api/v1/agent/query."""
 
+    session_id: str | None = Field(
+        default=None,
+        description="Grafana session ID from the connect flow. Required for Grafana tool calls.",
+    )
     query: str = Field(
         ...,
         min_length=1,

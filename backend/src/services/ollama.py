@@ -99,6 +99,29 @@ class OllamaService:
         log.debug("ollama_generate_done", tokens_used=tokens_used)
         return answer, tokens_used
 
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        model: str | None = None,
+        temperature: float = 0.3,
+    ) -> dict:
+        """Call /api/chat (supports tool/function calling) and return the response message."""
+        effective_model = model or self._settings.ollama_model
+        payload: dict[str, object] = {
+            "model": effective_model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if tools:
+            payload["tools"] = tools
+        response = await self._client.post("/api/chat", json=payload)
+        response.raise_for_status()
+        data: dict[str, object] = response.json()
+        msg: dict = data.get("message", {})  # type: ignore[assignment]
+        return msg
+
     async def list_models(self) -> list[str]:
         """Return model names available in this Ollama instance."""
         response = await self._client.get("/api/tags")
