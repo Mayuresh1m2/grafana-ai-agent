@@ -33,8 +33,18 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def _build_system(context: dict[str, str]) -> str:
+def _build_system(context: dict[str, str], datasources: list | None = None) -> str:
     base = _SYSTEM_PROMPT
+    if datasources:
+        ds_lines = "\n".join(
+            f"  - {ds.name}  type={ds.type}  uid={ds.uid}{' [default]' if ds.is_default else ''}"
+            for ds in datasources
+        )
+        base = (
+            f"{base}\n\nAvailable Grafana datasources (use these UIDs directly in tool calls):\n{ds_lines}\n"
+            "When querying logs use the uid of the datasource with type=loki. "
+            "When querying metrics use the uid of the datasource with type=prometheus."
+        )
     if context:
         ctx = "\n".join(f"  {k}: {v}" for k, v in context.items())
         base = f"{base}\n\nSession context:\n{ctx}"
@@ -58,8 +68,11 @@ async def _run_agent(
         log.warning("agent_no_session_id", detail="No session_id provided — Grafana tools will be unavailable")
 
     client: GrafanaClient | None = None
+    datasources = None
     if session:
         client = await GrafanaClient.create(session)
+        datasources = client.get_datasources()
+        log.info("agent_datasources_injected", datasources=[f"{d.name}({d.type})" for d in datasources])
 
     tools = TOOLS if client else None
 
@@ -77,7 +90,7 @@ async def _run_agent(
         log.warning("agent_tools_disabled", reason=reason, session_id=request.session_id)
         yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
 
-    system_prompt = _build_system(request.context or {})
+    system_prompt = _build_system(request.context or {}, datasources=datasources)
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},

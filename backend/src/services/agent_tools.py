@@ -29,12 +29,13 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "logql": {"type": "string", "description": "LogQL expression, e.g. '{namespace=\"prod\",app=\"checkout\"} |= \"error\"'"},
-                    "start": {"type": "string", "description": "Range start as Loki duration string (e.g. 'now-1h'). Default: now-1h."},
-                    "end":   {"type": "string", "description": "Range end. Default: now."},
-                    "limit": {"type": "integer", "description": "Max log lines to return. Default: 50."},
+                    "logql":          {"type": "string",  "description": "LogQL expression, e.g. '{namespace=\"prod\",app=\"checkout\"} |= \"error\"'"},
+                    "datasource_uid": {"type": "string",  "description": "UID of the Loki datasource (from the datasource list in your context). Required."},
+                    "start":          {"type": "string",  "description": "Range start as Loki duration string (e.g. 'now-1h'). Default: now-1h."},
+                    "end":            {"type": "string",  "description": "Range end. Default: now."},
+                    "limit":          {"type": "integer", "description": "Max log lines to return. Default: 50."},
                 },
-                "required": ["logql"],
+                "required": ["logql", "datasource_uid"],
             },
         },
     },
@@ -46,9 +47,10 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "promql": {"type": "string", "description": "PromQL expression, e.g. 'rate(http_requests_total{job=\"checkout\"}[5m])'"},
+                    "promql":         {"type": "string", "description": "PromQL expression, e.g. 'rate(http_requests_total{job=\"checkout\"}[5m])'"},
+                    "datasource_uid": {"type": "string", "description": "UID of the Prometheus datasource (from the datasource list in your context). Required."},
                 },
-                "required": ["promql"],
+                "required": ["promql", "datasource_uid"],
             },
         },
     },
@@ -76,11 +78,12 @@ async def execute_tool(name: str, args: dict[str, Any], client: GrafanaClient) -
         )
 
     if name == "query_loki":
-        logql = str(args["logql"])
-        start = str(args.get("start", "now-1h"))
-        end   = str(args.get("end", "now"))
-        limit = int(args.get("limit", 50))
-        result = await client.query_loki(logql, start=start, end=end, limit=limit)
+        logql          = str(args["logql"])
+        datasource_uid = args.get("datasource_uid") or None
+        start          = str(args.get("start", "now-1h"))
+        end            = str(args.get("end", "now"))
+        limit          = int(args.get("limit", 50))
+        result = await client.query_loki(logql, start=start, end=end, limit=limit, datasource_uid=datasource_uid)
         lines: list[str] = []
         for stream in (result.get("data") or {}).get("result", []):
             for _ts, line in stream.get("values", []):
@@ -90,8 +93,9 @@ async def execute_tool(name: str, args: dict[str, Any], client: GrafanaClient) -
         return "\n".join(lines[:limit])
 
     if name == "query_prometheus":
-        promql = str(args["promql"])
-        result = await client.query_prometheus(promql)
+        promql         = str(args["promql"])
+        datasource_uid = args.get("datasource_uid") or None
+        result = await client.query_prometheus(promql, datasource_uid=datasource_uid)
         results = (result.get("data") or {}).get("result", [])
         if not results:
             return "No data found for this PromQL query."
