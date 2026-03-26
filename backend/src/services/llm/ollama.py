@@ -53,9 +53,25 @@ class OllamaProvider(LLMProvider):
         )
 
         response = await self._client.post("/api/chat", json=payload)
+
+        if response.status_code == 400 and tools:
+            # Model does not support tool calling — retry without tools
+            logger.warning(
+                "ollama_tools_not_supported",
+                model=effective_model,
+                detail=response.text[:300],
+                hint="Switch to llama3.1, llama3.2, mistral-nemo, or qwen2.5 for tool calling",
+            )
+            payload.pop("tools")
+            response = await self._client.post("/api/chat", json=payload)
+
         response.raise_for_status()
         data: dict = response.json()
         msg: dict = data.get("message", {})
+
+        if tools and not msg.get("tool_calls"):
+            # Flag so the agent loop can warn the user
+            msg["_tools_skipped"] = True
 
         tool_calls = msg.get("tool_calls") or []
         logger.debug(

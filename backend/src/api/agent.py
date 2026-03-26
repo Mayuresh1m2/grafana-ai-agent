@@ -97,6 +97,13 @@ async def _run_agent(
                 temperature=request.temperature,
             )
 
+            if msg.get("_tools_skipped") and round_num == 0:
+                yield _sse({"type": "thinking", "chunk": (
+                    f"⚠ Model '{request.model or llm.default_model}' does not support tool calling — "
+                    "answering from training data only. Switch to llama3.1, llama3.2, or mistral-nemo "
+                    "for live Grafana data.\n"
+                )})
+
             tool_calls: list[dict] = msg.get("tool_calls") or []  # type: ignore[assignment]
 
             if not tool_calls:
