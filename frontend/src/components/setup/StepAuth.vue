@@ -1,57 +1,29 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
 import { connectGrafana, connectGrafanaAzureCli, connectGrafanaToken } from '@/api/session'
 
 type Mode = 'token' | 'sso' | 'credentials' | 'azure-cli'
-type SsoPhase = 'idle' | 'popup-open' | 'awaiting-cookie' | 'connecting' | 'done'
-
 const session = useSessionStore()
 
-const mode        = ref<Mode>('token')
+const mode         = ref<Mode>('token')
 const serviceToken = ref('')
-const azureScope  = ref('')
-const ssoPhase    = ref<SsoPhase>('idle')
-const ssoToken = ref('')
+const azureScope   = ref('')
+const ssoToken     = ref('')
+const ssoConnecting = ref(false)
 const username    = ref('')
 const password    = ref('')
 const connecting  = ref(false)
 const error       = ref<string | null>(null)
 
 // ── Popup management ──────────────────────────────────────────────────────────
-let popup: Window | null = null
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
 function openPopup() {
   error.value = null
-  popup = window.open(session.grafanaUrl, 'grafana-sso', 'width=960,height=700,noopener')
-  if (!popup) {
+  const w = window.open(session.grafanaUrl, 'grafana-sso', 'width=960,height=700,noopener')
+  if (!w) {
     error.value = 'Pop-up was blocked. Allow pop-ups for this page and try again.'
-    return
   }
-  ssoPhase.value = 'popup-open'
-  // Detect when the user closes the popup
-  pollTimer = setInterval(() => {
-    if (popup?.closed) {
-      stopPoll()
-      if (ssoPhase.value === 'popup-open') {
-        ssoPhase.value = 'awaiting-cookie'
-      }
-    }
-  }, 600)
 }
-
-function iLoggedIn() {
-  stopPoll()
-  popup?.close()
-  ssoPhase.value = 'awaiting-cookie'
-}
-
-function stopPoll() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
-
-onUnmounted(stopPoll)
 
 // ── Ensure session ID exists ──────────────────────────────────────────────────
 function ensureSessionId() {
@@ -80,17 +52,17 @@ async function submitToken() {
 async function submitSsoToken() {
   if (!ssoToken.value.trim()) return
   error.value = null
-  ssoPhase.value = 'connecting'
+  ssoConnecting.value = true
   ensureSessionId()
   try {
     await connectGrafanaToken(session.grafanaUrl, ssoToken.value.trim(), session.sessionId as string)
     session.authStatus = 'complete'
-    ssoPhase.value = 'done'
     session.goToStep(3)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     session.authStatus = 'failed'
-    ssoPhase.value = 'awaiting-cookie'
+  } finally {
+    ssoConnecting.value = false
   }
 }
 
@@ -136,13 +108,7 @@ function back() {
   session.goToStep(1)
 }
 
-function resetSso() {
-  stopPoll()
-  popup?.close()
-  ssoPhase.value = 'idle'
-  ssoToken.value = ''
-  error.value = null
-}
+
 </script>
 
 <template>
@@ -165,7 +131,7 @@ function resetSso() {
       </button>
       <button
         :class="['mode-tab', { active: mode === 'sso' }]"
-        @click="mode = 'sso'; resetSso()"
+        @click="mode = 'sso'; ssoToken = ''; error = null"
       >
         Microsoft SSO
       </button>
@@ -281,68 +247,51 @@ function resetSso() {
     <!-- ── SSO flow ── -->
     <template v-else-if="mode === 'sso'">
       <p class="step-panel__desc">
-        Open Grafana in a pop-up, complete the Microsoft login, then copy the
-        session cookie and paste it below.
+        Open Grafana to log in via Microsoft SSO, then copy your API token and paste it below.
       </p>
 
-      <!-- Step 1: open popup -->
-      <div v-if="ssoPhase === 'idle'" class="step-panel__actions">
-        <button class="btn-primary" @click="openPopup">
+      <div class="step-panel__actions">
+        <button class="btn-secondary" @click="openPopup">
           Open Grafana login
         </button>
       </div>
 
-      <!-- Step 2: popup is open -->
-      <div v-else-if="ssoPhase === 'popup-open'" class="status-card">
-        <span class="spinner" aria-label="Waiting for login…" />
-        <div>
-          <p class="status-card__title">Complete the Microsoft login in the popup.</p>
-          <p class="status-card__hint">
-            The wizard will advance automatically when you close it, or click the button below.
-          </p>
-        </div>
-        <button class="btn-ghost btn--sm" @click="iLoggedIn">I'm logged in</button>
+      <div class="cookie-guide">
+        <p class="cookie-guide__title">After logging in, get your API token:</p>
+        <ol class="cookie-guide__steps">
+          <li>In the Grafana tab, click your avatar (bottom-left) → <strong>Profile</strong></li>
+          <li>Go to the <strong>API keys</strong> or <strong>Service accounts</strong> section</li>
+          <li>Create a new token (or copy an existing one)</li>
+          <li>Paste the token in the box below</li>
+        </ol>
       </div>
 
-      <!-- Step 3: paste token -->
-      <template v-else-if="ssoPhase === 'awaiting-cookie' || ssoPhase === 'connecting'">
-        <div class="cookie-guide">
-          <p class="cookie-guide__title">Copy your API token from Grafana:</p>
-          <ol class="cookie-guide__steps">
-            <li>In the Grafana tab, click your avatar (bottom-left) → <strong>Profile</strong></li>
-            <li>Go to the <strong>API keys</strong> or <strong>Service accounts</strong> section</li>
-            <li>Create a new token (or copy an existing one)</li>
-            <li>Paste the token in the box below</li>
-          </ol>
-        </div>
+      <label class="field">
+        <span class="field__label">API token</span>
+        <input
+          v-model="ssoToken"
+          type="password"
+          class="field__input field__input--mono"
+          placeholder="glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          autocomplete="off"
+          :disabled="ssoConnecting"
+        />
+      </label>
 
-        <label class="field">
-          <span class="field__label">API token</span>
-          <input
-            v-model="ssoToken"
-            type="password"
-            class="field__input field__input--mono"
-            placeholder="glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            autocomplete="off"
-            :disabled="ssoPhase === 'connecting'"
-          />
-        </label>
+      <p v-if="error" class="status-error">{{ error }}</p>
 
-        <p v-if="error" class="status-error">{{ error }}</p>
-
-        <div class="step-panel__nav">
-          <button class="btn-ghost" :disabled="ssoPhase === 'connecting'" @click="resetSso">
-            Start over
-          </button>
-          <button
-            class="btn-primary"
-            :disabled="!ssoToken.trim() || ssoPhase === 'connecting'"
-            @click="submitSsoToken"
-          >
-            {{ ssoPhase === 'connecting' ? 'Validating…' : 'Connect' }}
-          </button>
-        </div>
-      </template>
+      <div class="step-panel__nav">
+        <button class="btn-ghost" :disabled="ssoConnecting" @click="back">
+          Back
+        </button>
+        <button
+          class="btn-primary"
+          :disabled="!ssoToken.trim() || ssoConnecting"
+          @click="submitSsoToken"
+        >
+          {{ ssoConnecting ? 'Validating…' : 'Connect' }}
+        </button>
+      </div>
     </template>
 
     <!-- ── Credentials flow ── -->
@@ -399,10 +348,6 @@ function resetSso() {
       </form>
     </template>
 
-    <!-- Shared bottom nav (SSO mode only needs Back on first step) -->
-    <div v-if="mode === 'sso' && ssoPhase === 'idle'" class="step-panel__nav">
-      <button class="btn-ghost" @click="back">Back</button>
-    </div>
   </div>
 </template>
 
