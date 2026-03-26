@@ -62,6 +62,21 @@ async def _run_agent(
         client = await GrafanaClient.create(session)
 
     tools = TOOLS if client else None
+
+    if tools:
+        tool_names = [t["function"]["name"] for t in tools]
+        log.info("agent_tools_enabled", tools=tool_names)
+        yield _sse({"type": "thinking", "chunk": f"Grafana tools available: {', '.join(tool_names)}\n"})
+    else:
+        if not request.session_id:
+            reason = "no session_id in request — complete the setup flow first"
+        elif session is None:
+            reason = f"session '{request.session_id}' not found in store — reconnect to Grafana (backend may have restarted)"
+        else:
+            reason = "Grafana client could not be created"
+        log.warning("agent_tools_disabled", reason=reason, session_id=request.session_id)
+        yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
+
     system_prompt = _build_system(request.context or {})
 
     messages: list[dict] = [
