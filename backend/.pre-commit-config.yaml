@@ -16,7 +16,6 @@ repos:
         additional_dependencies:
           - pydantic>=2.7.0
           - pydantic-settings>=2.2.1
-          - types-python-dotenv
 
   # ── General file hygiene ────────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
