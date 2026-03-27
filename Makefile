@@ -37,13 +37,12 @@ install-frontend: ## Install frontend deps with npm
 	cd $(FRONTEND_DIR) && npm ci
 
 # ── Dev ───────────────────────────────────────────────────────────────────────
-dev: ## Start Docker stack, backend, and frontend concurrently
+dev: ## Start Docker stack (Qdrant), backend, and frontend concurrently
 	docker compose -f docker-compose.dev.yml up -d
 	@echo ""
-	@echo "  Grafana    -> http://localhost:3000  (admin/admin)"
-	@echo "  Prometheus -> http://localhost:9090"
-	@echo "  Loki       -> http://localhost:3100"
-	@echo "  Tempo      -> http://localhost:3200"
+	@echo "  Qdrant     -> http://localhost:6333"
+	@echo "  Backend    -> http://localhost:8000"
+	@echo "  Frontend   -> http://localhost:5173"
 	@echo ""
 	$(MAKE) -j2 dev-backend dev-frontend
 
@@ -53,7 +52,7 @@ dev-backend: ## Start FastAPI dev server (hot-reload)
 dev-frontend: ## Start Vite dev server
 	cd $(FRONTEND_DIR) && npm run dev
 
-down: ## Stop the Docker observability stack
+down: ## Stop the Docker stack
 	docker compose -f docker-compose.dev.yml down
 
 # ── Test ──────────────────────────────────────────────────────────────────────
