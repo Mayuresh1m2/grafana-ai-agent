@@ -2,7 +2,6 @@
 name = "grafana-ai-agent-backend"
 version = "0.1.0"
 description = "Grafana AI Agent — FastAPI backend service"
-readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 
