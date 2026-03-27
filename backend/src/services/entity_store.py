@@ -1,7 +1,8 @@
-"""JSON-file-backed store for service entities."""
+"""SQLite-backed store for service entities."""
 from __future__ import annotations
 
 import json
+import sqlite3
 from functools import lru_cache
 from pathlib import Path
 
@@ -12,52 +13,87 @@ from src.models.entity import EntityCreate, ServiceEntity
 
 logger = structlog.get_logger(__name__)
 
+_DDL = """
+CREATE TABLE IF NOT EXISTS entities (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    namespace   TEXT NOT NULL DEFAULT '',
+    entity_type TEXT NOT NULL DEFAULT 'service',
+    aliases     TEXT NOT NULL DEFAULT '[]',
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+);
+"""
+
 
 class EntityStore:
-    def __init__(self, file_path: str) -> None:
-        self._path = Path(file_path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._entities: dict[str, ServiceEntity] = {}
-        self._load()
-        logger.info("entity_store_ready", path=str(self._path), count=len(self._entities))
+    def __init__(self, db_path: str) -> None:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.executescript(_DDL)
+        self._conn.commit()
+        logger.info("entity_store_ready", db_path=db_path, count=self._count())
 
-    # ── persistence ──────────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _load(self) -> None:
-        if not self._path.exists():
-            return
-        try:
-            raw = json.loads(self._path.read_text())
-            for item in raw:
-                e = ServiceEntity.model_validate(item)
-                self._entities[e.id] = e
-        except Exception as exc:
-            logger.warning("entity_store_load_error", error=str(exc))
+    def _count(self) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
 
-    def _save(self) -> None:
-        data = [e.model_dump(mode="json") for e in self._entities.values()]
-        self._path.write_text(json.dumps(data, indent=2, default=str))
+    @staticmethod
+    def _row_to_entity(row: sqlite3.Row) -> ServiceEntity:
+        return ServiceEntity.model_validate({
+            "id":          row["id"],
+            "name":        row["name"],
+            "namespace":   row["namespace"],
+            "entity_type": row["entity_type"],
+            "aliases":     json.loads(row["aliases"]),
+            "description": row["description"],
+            "created_at":  row["created_at"],
+        })
 
-    # ── CRUD ─────────────────────────────────────────────────────────────────
+    # ── CRUD ──────────────────────────────────────────────────────────────────
 
     def add(self, body: EntityCreate) -> ServiceEntity:
         entity = ServiceEntity(**body.model_dump())
-        self._entities[entity.id] = entity
-        self._save()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO entities
+                (id, name, namespace, entity_type, aliases, description, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entity.id,
+                entity.name,
+                entity.namespace,
+                entity.entity_type.value,
+                json.dumps(entity.aliases),
+                entity.description,
+                entity.created_at.isoformat(),
+            ),
+        )
+        self._conn.commit()
         logger.info("entity_added", id=entity.id, name=entity.name)
         return entity
 
     def list_all(self) -> list[ServiceEntity]:
-        return list(self._entities.values())
+        rows = self._conn.execute(
+            "SELECT * FROM entities ORDER BY name"
+        ).fetchall()
+        return [self._row_to_entity(r) for r in rows]
 
     def get(self, id_: str) -> ServiceEntity | None:
-        return self._entities.get(id_)
+        row = self._conn.execute(
+            "SELECT * FROM entities WHERE id = ?", (id_,)
+        ).fetchone()
+        return self._row_to_entity(row) if row else None
 
     def delete(self, id_: str) -> bool:
-        if id_ not in self._entities:
+        if not self.get(id_):
             return False
-        del self._entities[id_]
-        self._save()
+        self._conn.execute("DELETE FROM entities WHERE id = ?", (id_,))
+        self._conn.commit()
         logger.info("entity_deleted", id=id_)
         return True
 
@@ -65,4 +101,4 @@ class EntityStore:
 @lru_cache(maxsize=1)
 def get_entity_store() -> EntityStore:
     settings = get_settings()
-    return EntityStore(file_path=settings.entities_file_path)
+    return EntityStore(db_path=settings.sqlite_db_path)

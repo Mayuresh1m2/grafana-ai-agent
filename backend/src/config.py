@@ -61,11 +61,16 @@ class Settings(BaseSettings):
     tempo_base_url: str = "http://localhost:3200"
 
     # ── RAG / Embeddings ─────────────────────────────────────────────────────
-    embedding_model: str = "nomic-embed-text"
-    chroma_db_path:  str = "./data/chroma"
+    embedding_model:       str = "nomic-embed-text"
+    embedding_vector_size: int = Field(default=768, gt=0,
+                                       description="Dimension of embedding vectors (768 for nomic-embed-text).")
 
-    # ── Entity resolver ───────────────────────────────────────────────────────
-    entities_file_path: str = "./data/entities.json"
+    # ── Qdrant (vector store for examples) ───────────────────────────────────
+    qdrant_url:             str = "http://localhost:6333"
+    qdrant_collection:      str = "query_examples"
+
+    # ── SQLite (structured store for entities) ────────────────────────────────
+    sqlite_db_path: str = "./data/grafana_ai.db"
 
 
 @lru_cache(maxsize=1)

@@ -16,7 +16,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "anyio>=4.4.0",
     # RAG / vector store
-    "chromadb>=0.5.0",
+    "qdrant-client>=1.9.0",
     # Grafana auth
     "playwright>=1.43.0",
     "cryptography>=42.0.0",
