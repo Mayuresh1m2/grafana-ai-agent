@@ -21,6 +21,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Query Examples' },
   },
   {
+    path: '/entities',
+    name: 'entities',
+    component: () => import('@/views/EntitiesView.vue'),
+    meta: { title: 'Service Entities' },
+  },
+  {
     // Catch-all 404
     path: '/:pathMatch(.*)*',
     name: 'not-found',

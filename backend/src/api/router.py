@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from src.api.agent import router as agent_router
+from src.api.entities import router as entities_router
 from src.api.examples import router as examples_router
 from src.api.grafana import router as grafana_router
 from src.api.health import router as health_router
@@ -16,3 +17,4 @@ api_router.include_router(report_router, prefix="/agent", tags=["agent"])
 api_router.include_router(llm_router, prefix="/llm", tags=["llm"])
 api_router.include_router(grafana_router, prefix="/grafana", tags=["grafana"])
 api_router.include_router(examples_router, prefix="/examples", tags=["examples"])
+api_router.include_router(entities_router, prefix="/entities", tags=["entities"])

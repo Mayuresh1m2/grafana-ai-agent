@@ -17,6 +17,8 @@ from src.services.ollama import parse_suggestions
 from src.services.session_store import SessionStore, get_session_store
 from src.services.rag.retriever import retrieve_examples
 from src.services.rag.store import ExampleStore, get_example_store
+from src.services.entity_store import EntityStore, get_entity_store
+from src.models.entity import resolve_entities
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -58,6 +60,7 @@ async def _run_agent(
     llm: LLMProvider,
     store: SessionStore,
     examples: ExampleStore,
+    entities: EntityStore,
 ) -> AsyncIterator[str]:
     log = logger.bind(session_id=request.session_id, query_preview=request.query[:80])
     log.info("agent_query_start", query=request.query, model=request.model, context=request.context)
@@ -103,6 +106,22 @@ async def _run_agent(
     if rag_block:
         system_prompt += rag_block
         log.info("rag_injected", chars=len(rag_block))
+
+    matched_entities = resolve_entities(request.query, entities.list_all())
+    if matched_entities:
+        lines = [
+            f"  - {e.name}  namespace={e.namespace}  type={e.entity_type.value}"
+            + (f"  # {e.description}" if e.description else "")
+            for e in matched_entities
+        ]
+        entity_block = (
+            "\n\nResolved entities from your query "
+            "(use these exact names and namespaces in tool calls):\n"
+            + "\n".join(lines)
+        )
+        system_prompt += entity_block
+        log.info("entity_resolution_injected", count=len(matched_entities),
+                 names=[e.name for e in matched_entities])
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
@@ -206,13 +225,14 @@ async def _run_agent(
     ),
 )
 async def agent_query(
-    request: AgentQueryRequest,
+    request:  AgentQueryRequest,
     llm:      Annotated[LLMProvider,    Depends(get_llm_provider)],
     store:    Annotated[SessionStore,   Depends(get_session_store)],
     examples: Annotated[ExampleStore,   Depends(get_example_store)],
+    entities: Annotated[EntityStore,    Depends(get_entity_store)],
 ) -> StreamingResponse:
     return StreamingResponse(
-        _run_agent(request, llm, store, examples),
+        _run_agent(request, llm, store, examples, entities),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

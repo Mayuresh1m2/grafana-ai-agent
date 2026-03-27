@@ -67,6 +67,7 @@ const isSetup = () => route.name === 'setup'
         </span>
         <div class="nav-right">
           <RouterLink to="/examples" class="nav-link">Examples</RouterLink>
+          <RouterLink to="/entities" class="nav-link">Entities</RouterLink>
           <button
             class="theme-toggle btn-reset"
             :aria-label="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"

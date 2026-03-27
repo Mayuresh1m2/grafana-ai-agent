@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"
     chroma_db_path:  str = "./data/chroma"
 
+    # ── Entity resolver ───────────────────────────────────────────────────────
+    entities_file_path: str = "./data/entities.json"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
