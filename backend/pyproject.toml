@@ -31,7 +31,6 @@ dev = [
     "ruff>=0.4.4",
     "mypy>=1.10.0",
     "pre-commit>=3.7.1",
-    "types-python-dotenv>=1.0.0",
 ]
 
 [build-system]
