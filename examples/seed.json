@@ -1,0 +1,146 @@
+[
+  {
+    "title": "Error logs for a service",
+    "description": "Retrieve error-level log lines for a specific application in a given namespace",
+    "query_type": "loki",
+    "category": "service",
+    "template": "{app=\"{{app}}\", namespace=\"{{namespace}}\"} |= \"error\" | logfmt",
+    "tags": ["errors", "loki", "service"],
+    "placeholders": ["app", "namespace"]
+  },
+  {
+    "title": "Exception / stack trace logs",
+    "description": "Find logs containing exceptions or stack traces for a service",
+    "query_type": "loki",
+    "category": "service",
+    "template": "{app=\"{{app}}\", namespace=\"{{namespace}}\"} |~ \"(?i)(exception|traceback|panic|fatal)\"",
+    "tags": ["exceptions", "errors", "loki"],
+    "placeholders": ["app", "namespace"]
+  },
+  {
+    "title": "HTTP 5xx errors from a service",
+    "description": "Show HTTP 500-range error responses logged by a service",
+    "query_type": "loki",
+    "category": "service",
+    "template": "{app=\"{{app}}\", namespace=\"{{namespace}}\"} | logfmt | status >= 500",
+    "tags": ["http", "5xx", "errors", "loki"],
+    "placeholders": ["app", "namespace"]
+  },
+  {
+    "title": "All logs for a namespace (last hour)",
+    "description": "Tail all log lines across every pod in a Kubernetes namespace",
+    "query_type": "loki",
+    "category": "kubernetes",
+    "template": "{namespace=\"{{namespace}}\"}",
+    "tags": ["namespace", "loki", "kubernetes"],
+    "placeholders": ["namespace"]
+  },
+  {
+    "title": "OOMKilled events in a namespace",
+    "description": "Detect out-of-memory kills recorded in Kubernetes events or container logs",
+    "query_type": "loki",
+    "category": "kubernetes",
+    "template": "{namespace=\"{{namespace}}\"} |~ \"(?i)(OOMKilled|out of memory|memory limit)\"",
+    "tags": ["oom", "memory", "kubernetes", "loki"],
+    "placeholders": ["namespace"]
+  },
+  {
+    "title": "CrashLoopBackOff events",
+    "description": "Find Kubernetes pod crash-loop events in the cluster event log",
+    "query_type": "loki",
+    "category": "kubernetes",
+    "template": "{job=\"kubernetes-events\", namespace=\"{{namespace}}\"} |= \"CrashLoopBackOff\"",
+    "tags": ["crashloop", "kubernetes", "events"],
+    "placeholders": ["namespace"]
+  },
+  {
+    "title": "Slow database queries",
+    "description": "Find log lines reporting slow or long-running database queries",
+    "query_type": "loki",
+    "category": "database",
+    "template": "{app=\"{{app}}\", namespace=\"{{namespace}}\"} |~ \"(?i)(slow query|query took|long running)\"",
+    "tags": ["database", "slow", "performance", "loki"],
+    "placeholders": ["app", "namespace"]
+  },
+  {
+    "title": "Database connection errors",
+    "description": "Detect database connection failures or pool exhaustion in service logs",
+    "query_type": "loki",
+    "category": "database",
+    "template": "{app=\"{{app}}\", namespace=\"{{namespace}}\"} |~ \"(?i)(connection refused|connection reset|too many connections|pool exhausted)\"",
+    "tags": ["database", "connection", "errors", "loki"],
+    "placeholders": ["app", "namespace"]
+  },
+  {
+    "title": "Pod CPU usage",
+    "description": "Current CPU usage as a fraction of the requested CPU for a pod or service",
+    "query_type": "prometheus",
+    "category": "kubernetes",
+    "template": "rate(container_cpu_usage_seconds_total{namespace=\"{{namespace}}\", pod=~\"{{app}}-.*\"}[5m])",
+    "tags": ["cpu", "kubernetes", "prometheus"],
+    "placeholders": ["namespace", "app"]
+  },
+  {
+    "title": "Pod memory usage",
+    "description": "Current working set memory in bytes for pods matching a service name",
+    "query_type": "prometheus",
+    "category": "kubernetes",
+    "template": "container_memory_working_set_bytes{namespace=\"{{namespace}}\", pod=~\"{{app}}-.*\", container!=\"\"}",
+    "tags": ["memory", "kubernetes", "prometheus"],
+    "placeholders": ["namespace", "app"]
+  },
+  {
+    "title": "HTTP request rate",
+    "description": "Per-second HTTP request throughput for a service over the last 5 minutes",
+    "query_type": "prometheus",
+    "category": "service",
+    "template": "sum(rate(http_requests_total{namespace=\"{{namespace}}\", job=\"{{app}}\"}[5m])) by (status_code)",
+    "tags": ["http", "throughput", "prometheus", "service"],
+    "placeholders": ["namespace", "app"]
+  },
+  {
+    "title": "HTTP error rate (5xx)",
+    "description": "Fraction of HTTP requests returning 5xx status codes for a service",
+    "query_type": "prometheus",
+    "category": "service",
+    "template": "sum(rate(http_requests_total{namespace=\"{{namespace}}\", job=\"{{app}}\", status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total{namespace=\"{{namespace}}\", job=\"{{app}}\"}[5m]))",
+    "tags": ["http", "errors", "5xx", "prometheus"],
+    "placeholders": ["namespace", "app"]
+  },
+  {
+    "title": "Request latency p99",
+    "description": "99th-percentile HTTP request duration for a service",
+    "query_type": "prometheus",
+    "category": "service",
+    "template": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"{{namespace}}\", job=\"{{app}}\"}[5m])) by (le))",
+    "tags": ["latency", "p99", "prometheus", "service"],
+    "placeholders": ["namespace", "app"]
+  },
+  {
+    "title": "Pod restart count",
+    "description": "Number of container restarts for pods in a namespace, sorted descending",
+    "query_type": "prometheus",
+    "category": "kubernetes",
+    "template": "sort_desc(kube_pod_container_status_restarts_total{namespace=\"{{namespace}}\"})",
+    "tags": ["restarts", "kubernetes", "prometheus"],
+    "placeholders": ["namespace"]
+  },
+  {
+    "title": "Node CPU saturation",
+    "description": "CPU usage across all cluster nodes as a percentage of total capacity",
+    "query_type": "prometheus",
+    "category": "infrastructure",
+    "template": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+    "tags": ["node", "cpu", "infrastructure", "prometheus"],
+    "placeholders": []
+  },
+  {
+    "title": "Node memory pressure",
+    "description": "Available memory on each node as a percentage of total RAM",
+    "query_type": "prometheus",
+    "category": "infrastructure",
+    "template": "100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+    "tags": ["node", "memory", "infrastructure", "prometheus"],
+    "placeholders": []
+  }
+]

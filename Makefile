@@ -7,6 +7,7 @@
         build build-backend build-frontend \
         docker-build docker-build-backend docker-build-frontend \
         helm-lint helm-template-test \
+        examples-load examples-dump examples-replace \
         pre-commit-install clean down help
 
 BACKEND_DIR  := backend
@@ -131,6 +132,16 @@ helm-lint: ## Lint the Helm chart
 helm-template-test: ## Render chart and validate with kubectl dry-run (no cluster needed)
 	helm template grafana-ai-agent $(HELM_CHART) $(HELM_TEST_ARGS) \
 		| kubectl apply --dry-run=client -f -
+
+# ── Examples ──────────────────────────────────────────────────────────────────
+examples-load: ## Seed Qdrant with examples/seed.json (skips existing by ID)
+	cd $(BACKEND_DIR) && uv run python scripts/examples.py load
+
+examples-dump: ## Dump all Qdrant examples to examples/seed.json
+	cd $(BACKEND_DIR) && uv run python scripts/examples.py dump
+
+examples-replace: ## Load examples/seed.json, overwriting any with matching IDs
+	cd $(BACKEND_DIR) && uv run python scripts/examples.py load --replace
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 pre-commit-install: ## Install git pre-commit hooks (backend)
