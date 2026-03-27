@@ -34,7 +34,7 @@ install-backend: ## Install backend deps with uv
 	cd $(BACKEND_DIR) && uv sync --all-extras
 
 install-frontend: ## Install frontend deps with npm
-	cd $(FRONTEND_DIR) && npm ci
+	cd $(FRONTEND_DIR) && npm install
 
 # ── Dev ───────────────────────────────────────────────────────────────────────
 dev: ## Start Docker stack (Qdrant), backend, and frontend concurrently
