@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from typing import Annotated, AsyncIterator
 
 import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from src.api._sse import sse_event as _sse
 from src.models.requests import ReportRequest
-from src.services.llm.factory import get_llm_provider
 from src.services.llm.base import LLMProvider
+from src.services.llm.factory import get_llm_provider
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -79,10 +79,6 @@ def _build_prompt(request: ReportRequest) -> str:
     transcript = "\n\n".join(turns)
 
     return _REPORT_TEMPLATE.format(context_block=context_block, transcript=transcript)
-
-
-def _sse(event: dict) -> str:
-    return f"data: {json.dumps(event)}\n\n"
 
 
 async def _stream_report(

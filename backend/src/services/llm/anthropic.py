@@ -135,13 +135,14 @@ class AnthropicProvider(LLMProvider):
         tools: list[dict] | None = None,
         model: str | None = None,
         temperature: float = 0.3,
+        max_tokens: int = 4096,
     ) -> dict:
         effective_model = model or self._settings.anthropic_model
         system, anthro_messages = _ollama_messages_to_anthropic(messages)
 
         kwargs: dict = {
             "model": effective_model,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": anthro_messages,
         }

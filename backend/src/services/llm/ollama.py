@@ -31,13 +31,14 @@ class OllamaProvider(LLMProvider):
         tools: list[dict] | None = None,
         model: str | None = None,
         temperature: float = 0.3,
+        max_tokens: int = 4096,
     ) -> dict:
         effective_model = model or self._settings.ollama_model
         payload: dict = {
             "model": effective_model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": temperature},
+            "options": {"temperature": temperature, "num_predict": max_tokens},
         }
         if tools:
             payload["tools"] = tools

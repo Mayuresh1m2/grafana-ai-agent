@@ -1,24 +1,23 @@
 """Agent query endpoint — agentic loop with Grafana tool calling, SSE streaming."""
 from __future__ import annotations
 
-import json
 from typing import Annotated, AsyncIterator
 
 import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from src.api._sse import sse_event as _sse
+from src.models.entity import resolve_entities
 from src.models.requests import AgentQueryRequest
-from src.services.agent_tools import TOOLS, execute_tool
+from src.services.agent_tools import execute_tool, get_tools
+from src.services.entity_store import EntityStore, get_entity_store
 from src.services.grafana import GrafanaClient
+from src.services.llm.base import LLMProvider, parse_suggestions
 from src.services.llm.factory import get_llm_provider
-from src.services.llm.base import LLMProvider
-from src.services.ollama import parse_suggestions
-from src.services.session_store import SessionStore, get_session_store
 from src.services.rag.retriever import retrieve_examples
 from src.services.rag.store import ExampleStore, get_example_store
-from src.services.entity_store import EntityStore, get_entity_store
-from src.models.entity import resolve_entities
+from src.services.session_store import SessionStore, get_session_store
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -33,27 +32,75 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _sse(event: dict) -> str:
-    return f"data: {json.dumps(event)}\n\n"
+# ── System prompt assembly ────────────────────────────────────────────────────
+
+def _datasource_block(datasources: list) -> str:
+    lines = "\n".join(
+        f"  - {ds.name}  type={ds.type}  uid={ds.uid}{' [default]' if ds.is_default else ''}"
+        for ds in datasources
+    )
+    return (
+        f"\n\nAvailable Grafana datasources (use these UIDs directly in tool calls):\n{lines}\n"
+        "When querying logs use the uid of the datasource with type=loki. "
+        "When querying metrics use the uid of the datasource with type=prometheus."
+    )
 
 
-def _build_system(context: dict[str, str], datasources: list | None = None) -> str:
-    base = _SYSTEM_PROMPT
+def _context_block(context: dict[str, str]) -> str:
+    lines = "\n".join(f"  {k}: {v}" for k, v in context.items())
+    return f"\n\nSession context:\n{lines}"
+
+
+def _entity_block(query: str, entities: EntityStore) -> str:
+    matched = resolve_entities(query, entities.list_all())
+    if not matched:
+        return ""
+    lines = [
+        f"  - {e.name}  namespace={e.namespace}  type={e.entity_type.value}"
+        + (f"  # {e.description}" if e.description else "")
+        for e in matched
+    ]
+    return (
+        "\n\nResolved entities from your query "
+        "(use these exact names and namespaces in tool calls):\n"
+        + "\n".join(lines)
+    )
+
+
+async def _build_system_prompt(
+    request: AgentQueryRequest,
+    datasources: list | None,
+    examples: ExampleStore,
+    entities: EntityStore,
+) -> tuple[str, int, int]:
+    """Assemble the full system prompt.
+
+    Returns ``(system_prompt, rag_chars, entity_count)`` for logging.
+    """
+    prompt = _SYSTEM_PROMPT
+
     if datasources:
-        ds_lines = "\n".join(
-            f"  - {ds.name}  type={ds.type}  uid={ds.uid}{' [default]' if ds.is_default else ''}"
-            for ds in datasources
-        )
-        base = (
-            f"{base}\n\nAvailable Grafana datasources (use these UIDs directly in tool calls):\n{ds_lines}\n"
-            "When querying logs use the uid of the datasource with type=loki. "
-            "When querying metrics use the uid of the datasource with type=prometheus."
-        )
-    if context:
-        ctx = "\n".join(f"  {k}: {v}" for k, v in context.items())
-        base = f"{base}\n\nSession context:\n{ctx}"
-    return base
+        prompt += _datasource_block(datasources)
+    if request.context:
+        prompt += _context_block(request.context)
 
+    rag_block = await retrieve_examples(
+        query=request.query,
+        context=request.context or {},
+        store=examples,
+    )
+    if rag_block:
+        prompt += rag_block
+
+    entity_block = _entity_block(request.query, entities)
+    if entity_block:
+        prompt += entity_block
+
+    matched_count = len(resolve_entities(request.query, entities.list_all()))
+    return prompt, len(rag_block), matched_count
+
+
+# ── Agent loop ────────────────────────────────────────────────────────────────
 
 async def _run_agent(
     request: AgentQueryRequest,
@@ -65,11 +112,12 @@ async def _run_agent(
     log = logger.bind(session_id=request.session_id, query_preview=request.query[:80])
     log.info("agent_query_start", query=request.query, model=request.model, context=request.context)
 
-    # Resolve Grafana session
+    # ── Resolve Grafana session ───────────────────────────────────────────────
     session = None
     if request.session_id:
         session = await store.get(request.session_id)
-        log.info("agent_session_resolved", found=session is not None, grafana_url=session.grafana_url if session else None)
+        log.info("agent_session_resolved", found=session is not None,
+                 grafana_url=session.grafana_url if session else None)
     else:
         log.warning("agent_no_session_id", detail="No session_id provided — Grafana tools will be unavailable")
 
@@ -80,7 +128,8 @@ async def _run_agent(
         datasources = client.get_datasources()
         log.info("agent_datasources_injected", datasources=[f"{d.name}({d.type})" for d in datasources])
 
-    tools = TOOLS if client else None
+    # ── Tool availability ─────────────────────────────────────────────────────
+    tools = get_tools() if client else None
 
     if tools:
         tool_names = [t["function"]["name"] for t in tools]
@@ -90,46 +139,29 @@ async def _run_agent(
         if not request.session_id:
             reason = "no session_id in request — complete the setup flow first"
         elif session is None:
-            reason = f"session '{request.session_id}' not found in store — reconnect to Grafana (backend may have restarted)"
+            reason = f"session '{request.session_id}' not found — reconnect to Grafana (backend may have restarted)"
         else:
             reason = "Grafana client could not be created"
-        log.warning("agent_tools_disabled", reason=reason, session_id=request.session_id)
+        log.warning("agent_tools_disabled", reason=reason)
         yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
 
-    system_prompt = _build_system(request.context or {}, datasources=datasources)
-
-    rag_block = await retrieve_examples(
-        query=request.query,
-        context=request.context or {},
-        store=examples,
+    # ── Prompt assembly ───────────────────────────────────────────────────────
+    system_prompt, rag_chars, entity_count = await _build_system_prompt(
+        request, datasources, examples, entities
     )
-    if rag_block:
-        system_prompt += rag_block
-        log.info("rag_injected", chars=len(rag_block))
+    if rag_chars:
+        log.info("rag_injected", chars=rag_chars)
+    if entity_count:
+        log.info("entity_resolution_injected", count=entity_count)
 
-    matched_entities = resolve_entities(request.query, entities.list_all())
-    if matched_entities:
-        lines = [
-            f"  - {e.name}  namespace={e.namespace}  type={e.entity_type.value}"
-            + (f"  # {e.description}" if e.description else "")
-            for e in matched_entities
-        ]
-        entity_block = (
-            "\n\nResolved entities from your query "
-            "(use these exact names and namespaces in tool calls):\n"
-            + "\n".join(lines)
-        )
-        system_prompt += entity_block
-        log.info("entity_resolution_injected", count=len(matched_entities),
-                 names=[e.name for e in matched_entities])
+    log.debug("agent_prompt_built", tools_enabled=tools is not None)
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
         {"role": "user",   "content": request.query},
     ]
 
-    log.debug("agent_prompt_built", system_prompt=system_prompt, tools_enabled=tools is not None)
-
+    # ── Agentic tool loop ─────────────────────────────────────────────────────
     try:
         for round_num in range(_MAX_TOOL_ROUNDS):
             log.info("agent_llm_call", round=round_num, message_count=len(messages))
@@ -139,6 +171,7 @@ async def _run_agent(
                 tools=tools,
                 model=request.model,
                 temperature=request.temperature,
+                max_tokens=request.max_tokens,
             )
 
             if msg.get("_tools_skipped") and round_num == 0:
@@ -148,16 +181,14 @@ async def _run_agent(
                     "for live Grafana data.\n"
                 )})
 
-            tool_calls: list[dict] = msg.get("tool_calls") or []  # type: ignore[assignment]
+            tool_calls: list[dict] = msg.get("tool_calls") or []
 
             if not tool_calls:
-                # Final answer — stream it
-                content: str = msg.get("content") or ""  # type: ignore[assignment]
-                log.info("agent_final_answer", round=round_num, content_length=len(content), content=content)
+                content: str = msg.get("content") or ""
+                log.info("agent_final_answer", round=round_num, content_length=len(content))
                 clean, suggestions = parse_suggestions(content)
                 yield _sse({"type": "content", "chunk": clean})
                 if suggestions:
-                    log.debug("agent_suggestions", suggestions=suggestions)
                     yield _sse({"type": "suggestions", "items": suggestions})
                 log.info("agent_query_done", rounds=round_num + 1)
                 yield _sse({"type": "done"})
@@ -166,19 +197,18 @@ async def _run_agent(
             log.info("agent_tool_calls_selected", round=round_num, count=len(tool_calls),
                      tools=[c.get("function", {}).get("name") for c in tool_calls])
 
-            # Append assistant turn with tool calls
             messages.append({
                 "role":       "assistant",
                 "content":    msg.get("content") or "",
                 "tool_calls": tool_calls,
             })
 
-            # Execute each tool call
             for call in tool_calls:
                 fn   = call.get("function") or {}
                 name = str(fn.get("name", ""))
-                raw_args = fn.get("arguments") or {}
-                args: dict = raw_args if isinstance(raw_args, dict) else {}
+                args: dict = fn.get("arguments") or {}
+                if not isinstance(args, dict):
+                    args = {}
 
                 args_str = ", ".join(f"{k}={v}" for k, v in args.items()) if args else ""
                 log.info("agent_tool_executing", tool=name, args=args)
@@ -189,18 +219,17 @@ async def _run_agent(
                         result = await execute_tool(name, args, client)
                     except Exception as exc:
                         result = f"Tool error: {exc}"
-                        log.error("agent_tool_error", tool=name, args=args, error=str(exc), exc_info=True)
+                        log.error("agent_tool_error", tool=name, error=str(exc), exc_info=True)
                 else:
                     result = "No Grafana session — connect first."
 
-                log.info("agent_tool_result", tool=name, result_length=len(result), result=result)
+                log.info("agent_tool_result", tool=name, result_length=len(result))
                 messages.append({"role": "tool", "content": result})
 
-        # Exhausted rounds — get final answer without tools
+        # Exhausted rounds — get a final answer without tools
         log.warning("agent_max_rounds_reached", rounds=_MAX_TOOL_ROUNDS)
-        msg = await llm.chat(messages, tools=None, model=request.model)
-        content = msg.get("content") or ""  # type: ignore[assignment]
-        log.info("agent_final_answer_after_max_rounds", content=content)
+        msg = await llm.chat(messages, tools=None, model=request.model, max_tokens=request.max_tokens)
+        content = msg.get("content") or ""
         clean, suggestions = parse_suggestions(content)
         yield _sse({"type": "content", "chunk": clean})
         if suggestions:
@@ -214,6 +243,8 @@ async def _run_agent(
         if client:
             await client.aclose()
 
+
+# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.post(
     "/query",
