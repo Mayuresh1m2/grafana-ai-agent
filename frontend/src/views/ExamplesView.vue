@@ -77,6 +77,10 @@ async function save() {
   }
 }
 
+function placeholder(key: string): string {
+  return `\u007b\u007b${key}\u007d\u007d`
+}
+
 function resetForm() {
   form.value  = { title: '', description: '', query_type: 'loki', category: 'service', template: '', tags: [], placeholders: [] }
   tagsInput.value = ''
@@ -146,7 +150,7 @@ async function remove(id: string) {
         <!-- Auto-detected placeholders -->
         <div v-if="detectedPlaceholders.length" class="placeholder-chips">
           <span class="chips-label">Detected placeholders:</span>
-          <span v-for="p in detectedPlaceholders" :key="p" class="chip">{{ '{{' + p + '}}' }}</span>
+          <span v-for="p in detectedPlaceholders" :key="p" class="chip">{{ placeholder(p) }}</span>
         </div>
 
         <label class="field">
@@ -209,7 +213,7 @@ async function remove(id: string) {
         <pre class="example-template">{{ ex.template }}</pre>
         <div class="example-footer">
           <span v-for="tag in ex.tags" :key="tag" class="tag">{{ tag }}</span>
-          <span v-for="p in ex.placeholders" :key="p" class="chip chip--sm">{{ '{{' + p + '}}' }}</span>
+          <span v-for="p in ex.placeholders" :key="p" class="chip chip--sm">{{ placeholder(p) }}</span>
         </div>
       </li>
     </ul>
