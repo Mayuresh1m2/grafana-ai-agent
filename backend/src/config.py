@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # ── Tempo ────────────────────────────────────────────────────────────────
     tempo_base_url: str = "http://localhost:3200"
 
+    # ── RAG / Embeddings ─────────────────────────────────────────────────────
+    embedding_model: str = "nomic-embed-text"
+    chroma_db_path:  str = "./data/chroma"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -15,6 +15,8 @@ from src.services.llm.factory import get_llm_provider
 from src.services.llm.base import LLMProvider
 from src.services.ollama import parse_suggestions
 from src.services.session_store import SessionStore, get_session_store
+from src.services.rag.retriever import retrieve_examples
+from src.services.rag.store import ExampleStore, get_example_store
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -55,6 +57,7 @@ async def _run_agent(
     request: AgentQueryRequest,
     llm: LLMProvider,
     store: SessionStore,
+    examples: ExampleStore,
 ) -> AsyncIterator[str]:
     log = logger.bind(session_id=request.session_id, query_preview=request.query[:80])
     log.info("agent_query_start", query=request.query, model=request.model, context=request.context)
@@ -91,6 +94,15 @@ async def _run_agent(
         yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
 
     system_prompt = _build_system(request.context or {}, datasources=datasources)
+
+    rag_block = await retrieve_examples(
+        query=request.query,
+        context=request.context or {},
+        store=examples,
+    )
+    if rag_block:
+        system_prompt += rag_block
+        log.info("rag_injected", chars=len(rag_block))
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
@@ -195,11 +207,12 @@ async def _run_agent(
 )
 async def agent_query(
     request: AgentQueryRequest,
-    llm:   Annotated[LLMProvider,  Depends(get_llm_provider)],
-    store: Annotated[SessionStore, Depends(get_session_store)],
+    llm:      Annotated[LLMProvider,    Depends(get_llm_provider)],
+    store:    Annotated[SessionStore,   Depends(get_session_store)],
+    examples: Annotated[ExampleStore,   Depends(get_example_store)],
 ) -> StreamingResponse:
     return StreamingResponse(
-        _run_agent(request, llm, store),
+        _run_agent(request, llm, store, examples),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

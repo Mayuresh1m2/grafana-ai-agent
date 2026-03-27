@@ -15,6 +15,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Session Setup' },
   },
   {
+    path: '/examples',
+    name: 'examples',
+    component: () => import('@/views/ExamplesView.vue'),
+    meta: { title: 'Query Examples' },
+  },
+  {
     // Catch-all 404
     path: '/:pathMatch(.*)*',
     name: 'not-found',

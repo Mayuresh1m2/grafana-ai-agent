@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, provide } from 'vue'
-import { RouterView, useRoute } from 'vue-router'
+import { RouterView, RouterLink, useRoute } from 'vue-router'
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const theme = ref<'dark' | 'light'>(
@@ -66,6 +66,7 @@ const isSetup = () => route.name === 'setup'
           Grafana AI Agent
         </span>
         <div class="nav-right">
+          <RouterLink to="/examples" class="nav-link">Examples</RouterLink>
           <button
             class="theme-toggle btn-reset"
             :aria-label="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"
@@ -160,6 +161,16 @@ const isSetup = () => route.name === 'setup'
 }
 .brand-icon { font-size: 1.1rem; opacity: 0.9; }
 .nav-right  { display: flex; align-items: center; gap: 0.75rem; }
+
+.nav-link {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius);
+  transition: color var(--t), background var(--t);
+}
+.nav-link:hover, .nav-link.router-link-active { color: var(--text); background: var(--surface-2); }
 
 .theme-toggle {
   font-size: 1.1rem;
