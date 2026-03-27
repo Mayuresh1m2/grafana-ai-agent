@@ -1,9 +1,9 @@
 """External service clients."""
 
-from src.services.grafana import GrafanaService
+from src.services.grafana import GrafanaClient
 from src.services.ollama import OllamaService
 
 __all__ = [
-    "GrafanaService",
+    "GrafanaClient",
     "OllamaService",
 ]
