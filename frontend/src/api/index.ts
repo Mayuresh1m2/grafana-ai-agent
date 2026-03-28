@@ -1,6 +1,2 @@
 export { agentApi } from './agent'
 export { apiClient } from './client'
-export { checkConnectivity, initAuth, pollAuth, fetchNamespaces } from './session'
-export type { ConnectivityResult, AuthInitResult, AuthPollStatus } from './session'
-export { clearSession, getSessionHistory } from './chat'
-export type { SessionPayload } from './chat'

@@ -3,12 +3,6 @@
  * All endpoints are relative — the Vite dev proxy forwards /api → backend.
  */
 
-export interface ConnectivityResult {
-  ok: boolean
-  latencyMs?: number
-  error?: string
-}
-
 export interface DatasourceInfo {
   uid: string
   name: string
@@ -29,16 +23,6 @@ export interface GrafanaConnectResult {
   session_id: string
   grafana_url: string
   datasources: DatasourceInfo[]
-}
-
-export async function checkConnectivity(grafanaUrl: string): Promise<ConnectivityResult> {
-  const res = await fetch('/api/v1/session/connectivity', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ grafana_url: grafanaUrl }),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
 }
 
 async function _postConnect(body: Record<string, string>): Promise<GrafanaConnectResult> {
@@ -125,13 +109,3 @@ export async function fetchAlerts(sessionId: string): Promise<AlertInfo[]> {
   return res.json()
 }
 
-export async function fetchNamespaces(grafanaUrl: string): Promise<string[]> {
-  const res = await fetch('/api/v1/session/namespaces', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ grafana_url: grafanaUrl }),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data: { namespaces: string[] } = await res.json()
-  return data.namespaces
-}

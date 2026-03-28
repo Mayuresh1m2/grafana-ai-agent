@@ -1,13 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { checkConnectivity } from '@/api/session'
 
 const session = useSessionStore()
-
-const testing   = ref(false)
-const testError = ref<string | null>(null)
-const testOk    = ref<boolean | null>(null)
 
 const urlValid = computed(() => {
   try {
@@ -18,26 +13,8 @@ const urlValid = computed(() => {
   }
 })
 
-async function test() {
-  testError.value = null
-  testOk.value    = null
-  testing.value   = true
-  try {
-    const result = await checkConnectivity(session.grafanaUrl)
-    testOk.value = result.ok
-    session.connectivityOk = result.ok
-    if (!result.ok) testError.value = result.error ?? 'Could not reach Grafana'
-  } catch (e) {
-    testError.value = e instanceof Error ? e.message : String(e)
-    testOk.value = false
-    session.connectivityOk = false
-  } finally {
-    testing.value = false
-  }
-}
-
 function next() {
-  if (urlValid.value && testOk.value) session.goToStep(2)
+  if (urlValid.value) session.goToStep(2)
 }
 </script>
 
@@ -56,32 +33,17 @@ function next() {
       placeholder="https://grafana.example.com"
       autocomplete="off"
       spellcheck="false"
+      @keyup.enter="next"
     />
     <p v-if="session.grafanaUrl && !urlValid" class="field-error">
       Enter a valid http/https URL
     </p>
 
     <div class="step-panel__actions">
-      <button
-        class="btn-secondary"
-        :disabled="!urlValid || testing"
-        @click="test"
-      >
-        <span v-if="testing">Testing…</span>
-        <span v-else>Test connection</span>
-      </button>
-
-      <button
-        class="btn-primary"
-        :disabled="!testOk"
-        @click="next"
-      >
+      <button class="btn-primary" :disabled="!urlValid" @click="next">
         Next
       </button>
     </div>
-
-    <p v-if="testOk === true" class="status-ok">Connected successfully</p>
-    <p v-else-if="testError" class="status-error">{{ testError }}</p>
   </div>
 </template>
 
@@ -106,6 +68,4 @@ function next() {
 .field-input:focus { border-color: var(--accent-blue); }
 .field-input--error { border-color: var(--status-error); }
 .field-error { font-size: 0.8rem; color: var(--status-error); margin: -0.5rem 0 0; }
-.status-ok    { font-size: 0.85rem; color: var(--status-ok); }
-.status-error { font-size: 0.85rem; color: var(--status-error); }
 </style>

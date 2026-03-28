@@ -16,10 +16,9 @@ export const useSessionStore = defineStore('session', () => {
   const sessionId    = useLocalStorage<string | null>('setup.sessionId', null)
 
   // ── Transient state ──────────────────────────────────────────────────────
-  const authStatus        = ref<AuthStatus>('idle')
-  const authPollTimer     = ref<ReturnType<typeof setInterval> | null>(null)
-  const connectivityOk    = ref<boolean | null>(null)
-  const setupComplete     = ref(false)
+  const authStatus    = ref<AuthStatus>('idle')
+  const authPollTimer = ref<ReturnType<typeof setInterval> | null>(null)
+  const setupComplete = ref(false)
   const alerts            = ref<AlertInfo[]>([])
   const alertsLoading     = ref(false)
 
@@ -76,7 +75,6 @@ export const useSessionStore = defineStore('session', () => {
     sessionId.value    = null
     authStatus.value   = 'idle'
     setupComplete.value = false
-    connectivityOk.value = null
     stopAuthPoll()
   }
 
@@ -106,7 +104,7 @@ export const useSessionStore = defineStore('session', () => {
   return {
     // state
     step, grafanaUrl, namespace, environment, services, repoPath, sessionId,
-    authStatus, connectivityOk, setupComplete, alerts, alertsLoading,
+    authStatus, setupComplete, alerts, alertsLoading,
     // computed
     config, isReady,
     // actions
