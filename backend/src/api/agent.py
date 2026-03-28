@@ -8,14 +8,14 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from src.api._sse import sse_event as _sse
-from src.models.entity import resolve_entities
 from src.models.requests import AgentQueryRequest
 from src.services.agent_tools import execute_tool, get_tools
+from src.services.compactor import compress
 from src.services.entity_store import EntityStore, get_entity_store
 from src.services.grafana import GrafanaClient
 from src.services.llm.base import LLMProvider, parse_suggestions
 from src.services.llm.factory import get_llm_provider
-from src.services.rag.retriever import retrieve_examples
+from src.services.prompt_builder import build as build_prompt
 from src.services.rag.store import ExampleStore, get_example_store
 from src.services.session_store import SessionStore, get_session_store
 
@@ -24,112 +24,6 @@ router = APIRouter()
 
 _MAX_TOOL_ROUNDS = 6
 
-_SYSTEM_PROMPT = (
-    "You are an on-call AI assistant for a Kubernetes environment monitored by Grafana, Loki, and Prometheus. "
-    "You have tools to fetch live data: active alerts, logs (LogQL), and metrics (PromQL). "
-    "Always look up real data before answering questions about incidents, errors, or performance. "
-    "Be concise and actionable. When uncertain, say so."
-)
-
-
-# ── System prompt assembly ────────────────────────────────────────────────────
-
-def _datasource_block(datasources: list) -> str:
-    lines = "\n".join(
-        f"  - {ds.name}  type={ds.type}  uid={ds.uid}{' [default]' if ds.is_default else ''}"
-        for ds in datasources
-    )
-    return (
-        f"\n\nAvailable Grafana datasources (use these UIDs directly in tool calls):\n{lines}\n"
-        "When querying logs use the uid of the datasource with type=loki. "
-        "When querying metrics use the uid of the datasource with type=prometheus."
-    )
-
-
-def _context_block(context: dict[str, str]) -> str:
-    lines = "\n".join(f"  {k}: {v}" for k, v in context.items())
-    return f"\n\nSession context:\n{lines}"
-
-
-def _entity_block(query: str, entities: EntityStore) -> str:
-    matched = resolve_entities(query, entities.list_all())
-    if not matched:
-        return ""
-    lines = [
-        f"  - {e.name}  namespace={e.namespace}  type={e.entity_type.value}"
-        + (f"  # {e.description}" if e.description else "")
-        for e in matched
-    ]
-    return (
-        "\n\nResolved entities from your query "
-        "(use these exact names and namespaces in tool calls):\n"
-        + "\n".join(lines)
-    )
-
-
-async def _build_system_prompt(
-    request: AgentQueryRequest,
-    datasources: list | None,
-    examples: ExampleStore,
-    entities: EntityStore,
-) -> tuple[str, int, int]:
-    """Assemble the full system prompt.
-
-    Returns ``(system_prompt, rag_chars, entity_count)`` for logging.
-    """
-    prompt = _SYSTEM_PROMPT
-
-    if datasources:
-        prompt += _datasource_block(datasources)
-    if request.context:
-        prompt += _context_block(request.context)
-
-    rag_block = await retrieve_examples(
-        query=request.query,
-        context=request.context or {},
-        store=examples,
-    )
-    if rag_block:
-        prompt += rag_block
-
-    entity_block = _entity_block(request.query, entities)
-    if entity_block:
-        prompt += entity_block
-
-    matched_count = len(resolve_entities(request.query, entities.list_all()))
-    return prompt, len(rag_block), matched_count
-
-
-# ── Tool result compaction ────────────────────────────────────────────────────
-
-# Results shorter than this (chars) are kept verbatim — they're already concise.
-_COMPRESS_THRESHOLD = 400
-# Token budget for the compressed summary — tight by design.
-_COMPRESS_MAX_TOKENS = 180
-
-
-async def _compress(raw: str, tool_name: str, llm: LLMProvider) -> str:
-    """Summarise a verbose tool result into a few bullet points.
-
-    Only called when the raw result exceeds ``_COMPRESS_THRESHOLD`` characters.
-    Uses a minimal prompt and low token cap so it adds little latency and does
-    not itself consume significant context budget.
-    """
-    msg = await llm.chat(
-        messages=[{"role": "user", "content": (
-            f"Summarise the key findings from this {tool_name} result "
-            f"in 3-5 concise bullet points. Preserve specific values "
-            f"(numbers, service names, error messages). Be terse.\n\n{raw}"
-        )}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=_COMPRESS_MAX_TOKENS,
-    )
-    summary = (msg.get("content") or "").strip()
-    return summary if summary else raw
-
-
-# ── Agent loop ────────────────────────────────────────────────────────────────
 
 async def _run_agent(
     request: AgentQueryRequest,
@@ -148,7 +42,7 @@ async def _run_agent(
         log.info("agent_session_resolved", found=session is not None,
                  grafana_url=session.grafana_url if session else None)
     else:
-        log.warning("agent_no_session_id", detail="No session_id provided — Grafana tools will be unavailable")
+        log.warning("agent_no_session_id", detail="No session_id — Grafana tools will be unavailable")
 
     client: GrafanaClient | None = None
     datasources = None
@@ -174,16 +68,14 @@ async def _run_agent(
         log.warning("agent_tools_disabled", reason=reason)
         yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
 
-    # ── Prompt assembly ───────────────────────────────────────────────────────
-    system_prompt, rag_chars, entity_count = await _build_system_prompt(
+    # ── System prompt ─────────────────────────────────────────────────────────
+    system_prompt, rag_chars, entity_count = await build_prompt(
         request, datasources, examples, entities
     )
     if rag_chars:
         log.info("rag_injected", chars=rag_chars)
     if entity_count:
         log.info("entity_resolution_injected", count=entity_count)
-
-    log.debug("agent_prompt_built", tools_enabled=tools is not None)
 
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
@@ -252,14 +144,7 @@ async def _run_agent(
                 else:
                     result = "No Grafana session — connect first."
 
-                raw_len = len(result)
-                if raw_len > _COMPRESS_THRESHOLD:
-                    result = await _compress(result, name, llm)
-                    log.info("agent_tool_result_compressed", tool=name,
-                             raw_chars=raw_len, compressed_chars=len(result))
-                else:
-                    log.info("agent_tool_result", tool=name, result_length=raw_len)
-
+                result = await compress(result, name, llm)
                 messages.append({"role": "tool", "content": result})
 
         # Exhausted rounds — get a final answer without tools
@@ -279,8 +164,6 @@ async def _run_agent(
         if client:
             await client.aclose()
 
-
-# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.post(
     "/query",
