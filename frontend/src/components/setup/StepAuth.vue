@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { connectGrafana, connectGrafanaAzureCli, connectGrafanaToken, connectGrafanaCookie } from '@/api/session'
+import { connectGrafana, connectGrafanaAzureCli, connectGrafanaToken, reauthSsoBrowser } from '@/api/session'
 
 type Mode = 'token' | 'sso' | 'credentials' | 'azure-cli'
 const session = useSessionStore()
@@ -9,28 +9,15 @@ const session = useSessionStore()
 const mode         = ref<Mode>('token')
 const serviceToken = ref('')
 const azureScope   = ref('')
-const ssoToken      = ref('')
-const ssoConnecting = ref(false)
-const username    = ref('')
-const password    = ref('')
-const connecting  = ref(false)
-const error       = ref<string | null>(null)
+const username     = ref('')
+const password     = ref('')
+const connecting   = ref(false)
+const error        = ref<string | null>(null)
 
-// ── Popup management ──────────────────────────────────────────────────────────
-function openPopup() {
-  error.value = null
-  const w = window.open(session.grafanaUrl, 'grafana-sso', 'width=960,height=700,noopener')
-  if (!w) {
-    error.value = 'Pop-up was blocked. Allow pop-ups for this page and try again.'
-  }
-}
-
-// ── Ensure session ID exists ──────────────────────────────────────────────────
 function ensureSessionId() {
   if (!session.sessionId) session.sessionId = `session_${Date.now()}`
 }
 
-// ── Service account token submit ──────────────────────────────────────────────
 async function submitToken() {
   if (!serviceToken.value.trim()) return
   error.value = null
@@ -48,25 +35,22 @@ async function submitToken() {
   }
 }
 
-// ── SSO cookie submit ─────────────────────────────────────────────────────────
-async function submitSsoToken() {
-  if (!ssoToken.value.trim()) return
+async function submitSso() {
   error.value = null
-  ssoConnecting.value = true
+  connecting.value = true
   ensureSessionId()
   try {
-    await connectGrafanaCookie(session.grafanaUrl, ssoToken.value.trim(), session.sessionId as string)
+    await reauthSsoBrowser(session.sessionId as string, session.grafanaUrl)
     session.authStatus = 'complete'
     session.goToStep(3)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     session.authStatus = 'failed'
   } finally {
-    ssoConnecting.value = false
+    connecting.value = false
   }
 }
 
-// ── Credentials submit ────────────────────────────────────────────────────────
 async function submitAzureCli() {
   if (!azureScope.value.trim()) return
   error.value = null
@@ -102,8 +86,6 @@ async function submitCredentials() {
 }
 
 function back() {
-  stopPoll()
-  popup?.close()
   session.authStatus = 'idle'
   session.goToStep(1)
 }
@@ -131,7 +113,7 @@ function back() {
       </button>
       <button
         :class="['mode-tab', { active: mode === 'sso' }]"
-        @click="mode = 'sso'; ssoToken = ''; error = null"
+        @click="mode = 'sso'; error = null"
       >
         Microsoft SSO
       </button>
@@ -247,49 +229,24 @@ function back() {
     <!-- ── SSO flow ── -->
     <template v-else-if="mode === 'sso'">
       <p class="step-panel__desc">
-        Open Grafana to log in via Microsoft SSO, then copy the session cookie and paste it below.
+        A browser window will open so you can log in with Microsoft SSO.
+        Once you complete login the window closes automatically and the session is established.
       </p>
 
-      <div class="step-panel__actions">
-        <button class="btn-secondary" @click="openPopup">
-          Open Grafana login
-        </button>
+      <div v-if="connecting" class="status-card">
+        <span class="spinner" aria-label="Waiting for login…" />
+        <div>
+          <p class="status-card__title">Browser window opened</p>
+          <p class="status-card__hint">Complete your Microsoft SSO login to continue (up to 3 min).</p>
+        </div>
       </div>
-
-      <div class="cookie-guide">
-        <p class="cookie-guide__title">After logging in, copy your session cookie:</p>
-        <ol class="cookie-guide__steps">
-          <li>In the Grafana tab open DevTools — press <kbd>F12</kbd></li>
-          <li>Go to the <strong>Network</strong> tab and refresh the page</li>
-          <li>Click any request to <code>{{ session.grafanaUrl }}</code></li>
-          <li>Under <strong>Headers → Request Headers</strong> find <code>Cookie</code></li>
-          <li>Copy the value and paste it in the box below</li>
-        </ol>
-      </div>
-
-      <label class="field">
-        <span class="field__label">Cookie header value</span>
-        <textarea
-          v-model="ssoToken"
-          rows="3"
-          class="field__input field__input--mono"
-          placeholder="grafana_session=abc123; grafana_session_expiry=…"
-          :disabled="ssoConnecting"
-        />
-      </label>
 
       <p v-if="error" class="status-error">{{ error }}</p>
 
       <div class="step-panel__nav">
-        <button class="btn-ghost" :disabled="ssoConnecting" @click="back">
-          Back
-        </button>
-        <button
-          class="btn-primary"
-          :disabled="!ssoToken.trim() || ssoConnecting"
-          @click="submitSsoToken"
-        >
-          {{ ssoConnecting ? 'Validating…' : 'Connect' }}
+        <button class="btn-ghost" :disabled="connecting" @click="back">Back</button>
+        <button class="btn-primary" :disabled="connecting" @click="submitSso">
+          {{ connecting ? 'Waiting for login…' : 'Log in with SSO' }}
         </button>
       </div>
     </template>
@@ -384,28 +341,6 @@ function back() {
 }
 .status-card__title { font-size: 0.9rem; margin: 0 0 0.2rem; }
 .status-card__hint  { font-size: 0.8rem; color: var(--text-muted); margin: 0; }
-
-/* Cookie guide */
-.cookie-guide {
-  padding: 0.75rem;
-  background: var(--surface-2);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  font-size: 0.85rem;
-}
-.cookie-guide__title { font-weight: 500; margin: 0 0 0.5rem; }
-.cookie-guide__steps { margin: 0; padding-left: 1.25rem; line-height: 1.7; color: var(--text-muted); }
-.cookie-guide__steps strong, .cookie-guide__steps code, .cookie-guide__steps em {
-  color: var(--text);
-}
-kbd {
-  display: inline-block;
-  padding: 0.1rem 0.35rem;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font-size: 0.8rem;
-}
 
 /* Fields */
 .auth-form { display: flex; flex-direction: column; gap: 0.75rem; }

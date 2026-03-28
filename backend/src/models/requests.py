@@ -99,6 +99,25 @@ class GrafanaConnectRequest(BaseModel):
     )
 
 
+class GrafanaSsoBrowserRequest(BaseModel):
+    """Request body for POST /api/v1/grafana/reauth.
+
+    Opens a headed Chromium window so the user can complete SSO without
+    manually copying cookies.  Works for both the initial connect flow and
+    re-authentication after a session expires.
+    """
+
+    session_id: str = Field(..., description="Existing or new session identifier.")
+    grafana_url: str | None = Field(
+        default=None,
+        description=(
+            "Grafana base URL.  Required when creating a new session; "
+            "inferred from the stored session when refreshing an existing one."
+        ),
+        examples=["https://grafana.example.com"],
+    )
+
+
 class GrafanaRefreshRequest(BaseModel):
     """Request body for POST /api/v1/grafana/refresh."""
 

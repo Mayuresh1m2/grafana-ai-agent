@@ -103,6 +103,22 @@ export async function refreshGrafanaCookie(
   return res.json()
 }
 
+export async function reauthSsoBrowser(
+  sessionId: string,
+  grafanaUrl?: string,
+): Promise<GrafanaConnectResult> {
+  const res = await fetch('/api/v1/grafana/reauth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, grafana_url: grafanaUrl }),
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(typeof detail.detail === 'string' ? detail.detail : `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function fetchAlerts(sessionId: string): Promise<AlertInfo[]> {
   const res = await fetch(`/api/v1/grafana/alerts?session_id=${encodeURIComponent(sessionId)}`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)

@@ -13,7 +13,7 @@ from typing import Annotated
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.models.requests import GrafanaConnectRequest, GrafanaRefreshRequest
+from src.models.requests import GrafanaConnectRequest, GrafanaRefreshRequest, GrafanaSsoBrowserRequest
 from src.models.responses import AlertInfo, DatasourceInfo, GrafanaConnectResponse
 from src.services.grafana import GrafanaClient
 from src.services.grafana_auth import GrafanaAuthError, GrafanaAuthService
@@ -42,22 +42,23 @@ async def _discover_datasources(
     grafana_url: str,
     cookies: dict[str, str],
 ) -> list[DatasourceInfo]:
-    """Call /api/datasources via the auth service and return a ``DatasourceInfo`` list."""
+    """Validate *cookies* against /api/datasources and return the datasource list."""
+    tentative = GrafanaSession(
+        session_id="",
+        grafana_url=grafana_url,
+        cookies=cookies,
+        datasources=[],
+    )
     try:
-        raw = await _auth_service.fetch_datasources(grafana_url, cookies)
-    except GrafanaAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    return [
-        DatasourceInfo(
-            uid=str(ds.get("uid", "")),
-            name=str(ds.get("name", "")),
-            type=str(ds.get("type", "")),
-            is_default=bool(ds.get("isDefault", False)),
-        )
-        for ds in raw
-        if ds.get("uid")
-    ]
+        client = await GrafanaClient.create(tentative)
+        try:
+            return await client.fetch_datasources_from_api()
+        finally:
+            await client.aclose()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch datasources: {exc}") from exc
 
 
 async def _probe_and_store(
@@ -226,6 +227,55 @@ async def refresh(
     return GrafanaConnectResponse(
         session_id=body.session_id,
         grafana_url=session.grafana_url,
+        datasources=datasources,
+    )
+
+
+@router.post(
+    "/reauth",
+    response_model=GrafanaConnectResponse,
+    summary="Re-authenticate with Grafana via a headed SSO browser window",
+    description=(
+        "Opens a visible Chromium window so the user can complete SSO without "
+        "manually copying cookies.  Works for both the initial connect flow and "
+        "session refresh after a cookie expires.  The call blocks until the user "
+        "finishes login (up to 3 minutes) then captures all cookies automatically."
+    ),
+    status_code=200,
+)
+async def reauth(
+    body: GrafanaSsoBrowserRequest,
+    store: Annotated[SessionStore, Depends(get_session_store)],
+) -> GrafanaConnectResponse:
+    log = logger.bind(session_id=body.session_id)
+
+    existing = await store.get(body.session_id)
+    grafana_url = body.grafana_url or (existing.grafana_url if existing else None)
+    if not grafana_url:
+        raise HTTPException(
+            status_code=422,
+            detail="grafana_url is required when no existing session is found.",
+        )
+
+    log.info("grafana_reauth_sso_browser", grafana_url=grafana_url)
+    try:
+        cookies = await _auth_service.reauth_sso(grafana_url)
+    except GrafanaAuthError as exc:
+        log.warning("grafana_reauth_sso_failed", error=str(exc))
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    datasources = await _discover_datasources(grafana_url, cookies)
+    log.info("grafana_reauth_sso_success", datasource_count=len(datasources))
+
+    await store.put(GrafanaSession(
+        session_id=body.session_id,
+        grafana_url=grafana_url,
+        cookies=cookies,
+        datasources=datasources,
+    ))
+    return GrafanaConnectResponse(
+        session_id=body.session_id,
+        grafana_url=grafana_url,
         datasources=datasources,
     )
 
