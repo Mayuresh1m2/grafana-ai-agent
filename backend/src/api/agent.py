@@ -13,6 +13,11 @@ from src.services.agent_tools import execute_tool, get_tools
 from src.services.compactor import compress
 from src.services.entity_store import EntityStore, get_entity_store
 from src.services.grafana import GrafanaClient
+from src.services.investigation_store import (
+    InvestigationStore,
+    extract_findings,
+    get_investigation_store,
+)
 from src.services.llm.base import LLMProvider, parse_suggestions
 from src.services.llm.factory import get_llm_provider
 from src.services.prompt_builder import build as build_prompt
@@ -26,11 +31,12 @@ _MAX_TOOL_ROUNDS = 6
 
 
 async def _run_agent(
-    request: AgentQueryRequest,
-    llm: LLMProvider,
-    store: SessionStore,
-    examples: ExampleStore,
-    entities: EntityStore,
+    request:   AgentQueryRequest,
+    llm:       LLMProvider,
+    store:     SessionStore,
+    examples:  ExampleStore,
+    entities:  EntityStore,
+    inv_store: InvestigationStore,
 ) -> AsyncIterator[str]:
     log = logger.bind(session_id=request.session_id, query_preview=request.query[:80])
     log.info("agent_query_start", query=request.query, model=request.model, context=request.context)
@@ -68,9 +74,17 @@ async def _run_agent(
         log.warning("agent_tools_disabled", reason=reason)
         yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
 
+    # ── Investigation state (prior turns) ────────────────────────────────────
+    investigation = None
+    if request.session_id:
+        investigation = await inv_store.get(request.session_id)
+        if investigation and investigation.turn_count > 0:
+            log.info("investigation_state_loaded", turn=investigation.turn_count,
+                     findings=len(investigation.findings))
+
     # ── System prompt ─────────────────────────────────────────────────────────
     system_prompt, rag_chars, entity_count = await build_prompt(
-        request, datasources, examples, entities
+        request, datasources, examples, entities, investigation
     )
     if rag_chars:
         log.info("rag_injected", chars=rag_chars)
@@ -81,6 +95,7 @@ async def _run_agent(
         {"role": "system", "content": system_prompt},
         {"role": "user",   "content": request.query},
     ]
+    final_answer = ""   # captured for investigation state update
 
     # ── Agentic tool loop ─────────────────────────────────────────────────────
     try:
@@ -108,6 +123,7 @@ async def _run_agent(
                 content: str = msg.get("content") or ""
                 log.info("agent_final_answer", round=round_num, content_length=len(content))
                 clean, suggestions = parse_suggestions(content)
+                final_answer = clean
                 yield _sse({"type": "content", "chunk": clean})
                 if suggestions:
                     yield _sse({"type": "suggestions", "items": suggestions})
@@ -152,6 +168,7 @@ async def _run_agent(
         msg = await llm.chat(messages, tools=None, model=request.model, max_tokens=request.max_tokens)
         content = msg.get("content") or ""
         clean, suggestions = parse_suggestions(content)
+        final_answer = clean
         yield _sse({"type": "content", "chunk": clean})
         if suggestions:
             yield _sse({"type": "suggestions", "items": suggestions})
@@ -163,6 +180,15 @@ async def _run_agent(
     finally:
         if client:
             await client.aclose()
+        if request.session_id and final_answer:
+            try:
+                await inv_store.update(
+                    request.session_id,
+                    extract_findings(messages),
+                    final_answer,
+                )
+            except Exception as exc:
+                log.warning("investigation_state_save_failed", error=str(exc))
 
 
 @router.post(
@@ -175,14 +201,15 @@ async def _run_agent(
     ),
 )
 async def agent_query(
-    request:  AgentQueryRequest,
-    llm:      Annotated[LLMProvider,    Depends(get_llm_provider)],
-    store:    Annotated[SessionStore,   Depends(get_session_store)],
-    examples: Annotated[ExampleStore,   Depends(get_example_store)],
-    entities: Annotated[EntityStore,    Depends(get_entity_store)],
+    request:   AgentQueryRequest,
+    llm:       Annotated[LLMProvider,        Depends(get_llm_provider)],
+    store:     Annotated[SessionStore,       Depends(get_session_store)],
+    examples:  Annotated[ExampleStore,       Depends(get_example_store)],
+    entities:  Annotated[EntityStore,        Depends(get_entity_store)],
+    inv_store: Annotated[InvestigationStore, Depends(get_investigation_store)],
 ) -> StreamingResponse:
     return StreamingResponse(
-        _run_agent(request, llm, store, examples, entities),
+        _run_agent(request, llm, store, examples, entities, inv_store),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

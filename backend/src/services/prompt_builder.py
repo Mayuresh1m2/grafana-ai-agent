@@ -13,6 +13,7 @@ from src.models.entity import resolve_entities
 from src.models.requests import AgentQueryRequest
 from src.models.responses import DatasourceInfo
 from src.services.entity_store import EntityStore
+from src.services.investigation_store import InvestigationState
 from src.services.rag.retriever import retrieve_examples
 from src.services.rag.store import ExampleStore
 
@@ -44,6 +45,29 @@ def _context_block(context: dict[str, str]) -> str:
     return f"\n\nSession context:\n{lines}"
 
 
+def _investigation_block(state: InvestigationState) -> str:
+    """Summarise what was found in previous turns of this session.
+
+    Injected between the base instruction and the current user question so the
+    LLM can continue a multi-turn investigation without replaying raw history.
+    Truncated to keep the block within budget on small context windows.
+    """
+    if not state.findings and not state.last_answer:
+        return ""
+
+    lines = [f"Previous investigation findings (turns 1–{state.turn_count}):"]
+    for f in state.findings:
+        # Each summary is already compact (≤180 chars from compactor), but
+        # guard against edge cases by capping here too.
+        lines.append(f"  [{f.tool}] {f.summary[:300]}")
+
+    if state.last_answer:
+        lines.append(f"\nLast conclusion: {state.last_answer[:500]}")
+
+    lines.append("\nContinue the investigation based on the new question below.")
+    return "\n\n" + "\n".join(lines)
+
+
 def _entity_block(query: str, entities: EntityStore) -> str:
     matched = resolve_entities(query, entities.list_all())
     if not matched:
@@ -61,10 +85,11 @@ def _entity_block(query: str, entities: EntityStore) -> str:
 
 
 async def build(
-    request: AgentQueryRequest,
-    datasources: list[DatasourceInfo] | None,
-    examples: ExampleStore,
-    entities: EntityStore,
+    request:       AgentQueryRequest,
+    datasources:   list[DatasourceInfo] | None,
+    examples:      ExampleStore,
+    entities:      EntityStore,
+    investigation: InvestigationState | None = None,
 ) -> tuple[str, int, int]:
     """Return ``(system_prompt, rag_chars, entity_count)`` for the given request.
 
@@ -89,6 +114,9 @@ async def build(
     entity_block = _entity_block(request.query, entities)
     if entity_block:
         prompt += entity_block
+
+    if investigation and investigation.turn_count > 0:
+        prompt += _investigation_block(investigation)
 
     entity_count = len(resolve_entities(request.query, entities.list_all()))
     return prompt, len(rag_block), entity_count
