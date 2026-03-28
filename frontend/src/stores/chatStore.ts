@@ -74,14 +74,16 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = false
   }
 
-  function retryLastQuery() {
-    const userMsgs = messages.value.filter((m) => m.role === 'user')
-    if (!userMsgs.length) return
-    const last = userMsgs[userMsgs.length - 1]
-    // Remove the last assistant message if it errored
+  function retryLastQuery(): string | undefined {
+    // Find the last user message before popping anything
+    const lastUserIdx = messages.value.findLastIndex((m) => m.role === 'user')
+    if (lastUserIdx === -1) return undefined
+    const query = messages.value[lastUserIdx]!.content
+
+    // Remove the error assistant message, then the user message — sendQuery will re-add both
     if (messages.value.at(-1)?.status === 'error') messages.value.pop()
-    // Re-send (caller must supply sessionPayload again — this just removes the error msg)
-    return last.content
+    messages.value.splice(lastUserIdx, 1)
+    return query
   }
 
   function clearMessages() {

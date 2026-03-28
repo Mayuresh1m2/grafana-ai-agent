@@ -69,6 +69,12 @@ function sendQuery(query: string) {
   chat.sendQuery(query, sessionPayload())
 }
 
+function handleRefreshed() {
+  chat.sessionExpired = false
+  const query = chat.retryLastQuery()
+  if (query) sendQuery(query)
+}
+
 function handleQuickAction(q: string) {
   sendQuery(q)
 }
@@ -110,7 +116,7 @@ const suggestions = computed<string[]>(() => {
         <!-- Session-expired banner -->
         <SessionExpiredBanner
           v-if="chat.sessionExpired"
-          @refreshed="chat.sessionExpired = false"
+          @refreshed="handleRefreshed"
         />
 
         <!-- Message thread -->
