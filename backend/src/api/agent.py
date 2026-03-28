@@ -100,6 +100,35 @@ async def _build_system_prompt(
     return prompt, len(rag_block), matched_count
 
 
+# ── Tool result compaction ────────────────────────────────────────────────────
+
+# Results shorter than this (chars) are kept verbatim — they're already concise.
+_COMPRESS_THRESHOLD = 400
+# Token budget for the compressed summary — tight by design.
+_COMPRESS_MAX_TOKENS = 180
+
+
+async def _compress(raw: str, tool_name: str, llm: LLMProvider) -> str:
+    """Summarise a verbose tool result into a few bullet points.
+
+    Only called when the raw result exceeds ``_COMPRESS_THRESHOLD`` characters.
+    Uses a minimal prompt and low token cap so it adds little latency and does
+    not itself consume significant context budget.
+    """
+    msg = await llm.chat(
+        messages=[{"role": "user", "content": (
+            f"Summarise the key findings from this {tool_name} result "
+            f"in 3-5 concise bullet points. Preserve specific values "
+            f"(numbers, service names, error messages). Be terse.\n\n{raw}"
+        )}],
+        tools=None,
+        temperature=0.0,
+        max_tokens=_COMPRESS_MAX_TOKENS,
+    )
+    summary = (msg.get("content") or "").strip()
+    return summary if summary else raw
+
+
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
 async def _run_agent(
@@ -223,7 +252,14 @@ async def _run_agent(
                 else:
                     result = "No Grafana session — connect first."
 
-                log.info("agent_tool_result", tool=name, result_length=len(result))
+                raw_len = len(result)
+                if raw_len > _COMPRESS_THRESHOLD:
+                    result = await _compress(result, name, llm)
+                    log.info("agent_tool_result_compressed", tool=name,
+                             raw_chars=raw_len, compressed_chars=len(result))
+                else:
+                    log.info("agent_tool_result", tool=name, result_length=raw_len)
+
                 messages.append({"role": "tool", "content": result})
 
         # Exhausted rounds — get a final answer without tools
