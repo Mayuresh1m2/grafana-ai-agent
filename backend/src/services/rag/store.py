@@ -2,10 +2,18 @@
 
 Vectors are stored in Qdrant; full example metadata lives as the point
 payload alongside the vector — no separate relational database needed.
+
+Each Grafana instance gets its own Qdrant collection so that examples
+populated for one setup don't bleed into another.  The collection name
+is derived from the base collection setting plus a URL-derived slug, e.g.
+``examples_http___grafana_example_com_3000``.  A store for the empty /
+unknown URL falls back to the bare base collection name (useful for tests
+and dev seeds).
 """
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -22,7 +30,7 @@ from qdrant_client.models import (
 )
 
 from src.config import get_settings
-from src.models.example import ExampleCreate, PlaceholderKey, QueryCategory, QueryExample
+from src.models.example import ExampleCreate, QueryCategory, QueryExample
 from src.services.rag.embedder import OllamaEmbedder
 
 logger = structlog.get_logger(__name__)
@@ -92,7 +100,7 @@ class ExampleStore:
             category=QueryCategory(payload.get("category", QueryCategory.service.value)),
             template=payload["template"],
             tags=json.loads(payload.get("tags", "[]")),
-            placeholders=[PlaceholderKey(p) for p in json.loads(payload.get("placeholders", "[]"))],
+            placeholders=json.loads(payload.get("placeholders", "[]")),
             created_at=datetime.fromisoformat(payload["created_at"]),
         )
 
@@ -155,26 +163,48 @@ class ExampleStore:
             Filter(must=[FieldCondition(key="category", match=MatchValue(value=category.value))])
             if category else None
         )
-        results = self._client.search(
+        response = self._client.query_points(
             collection_name=self._collection,
-            query_vector=embedding,
+            query=embedding,
             limit=top_k,
             query_filter=query_filter,
             with_payload=True,
         )
         return [
             (self._from_payload(str(r.id), r.payload or {}), float(r.score))
-            for r in results
+            for r in response.points
         ]
 
 
-@lru_cache(maxsize=1)
-def get_example_store() -> ExampleStore:
+def _url_to_slug(grafana_url: str) -> str:
+    """Derive a short, filesystem-safe slug from a Grafana URL.
+
+    Used as a suffix on the Qdrant collection name so each Grafana instance
+    gets its own isolated example set.
+    """
+    slug = re.sub(r"[^\w]", "_", grafana_url.lower())
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug[:60]
+
+
+@lru_cache(maxsize=None)
+def get_example_store(grafana_url: str = "") -> ExampleStore:
+    """Return the ExampleStore for *grafana_url*, creating it on first access.
+
+    Results are cached by URL so repeated calls within the same process share
+    the same instance.  Pass an empty string to get the default (unseeded /
+    test) store that uses the bare ``qdrant_collection`` setting.
+    """
     settings = get_settings()
     embedder = OllamaEmbedder(settings)
+    collection = (
+        f"{settings.qdrant_collection}_{_url_to_slug(grafana_url)}"
+        if grafana_url
+        else settings.qdrant_collection
+    )
     return ExampleStore(
         qdrant_url=settings.qdrant_url,
-        collection=settings.qdrant_collection,
+        collection=collection,
         embedder=embedder,
         vector_size=settings.embedding_vector_size,
     )

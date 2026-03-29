@@ -21,7 +21,7 @@ from src.services.investigation_store import (
 from src.services.llm.base import LLMProvider, parse_suggestions
 from src.services.llm.factory import get_llm_provider
 from src.services.prompt_builder import build as build_prompt
-from src.services.rag.store import ExampleStore, get_example_store
+from src.services.rag.store import get_example_store
 from src.services.session_store import SessionStore, get_session_store
 
 logger = structlog.get_logger(__name__)
@@ -34,7 +34,6 @@ async def _run_agent(
     request:   AgentQueryRequest,
     llm:       LLMProvider,
     store:     SessionStore,
-    examples:  ExampleStore,
     entities:  EntityStore,
     inv_store: InvestigationStore,
 ) -> AsyncIterator[str]:
@@ -49,6 +48,9 @@ async def _run_agent(
                  grafana_url=session.grafana_url if session else None)
     else:
         log.warning("agent_no_session_id", detail="No session_id — Grafana tools will be unavailable")
+
+    # ── Instance-scoped RAG store ─────────────────────────────────────────────
+    examples = get_example_store(session.grafana_url if session else "")
 
     client: GrafanaClient | None = None
     datasources = None
@@ -204,12 +206,11 @@ async def agent_query(
     request:   AgentQueryRequest,
     llm:       Annotated[LLMProvider,        Depends(get_llm_provider)],
     store:     Annotated[SessionStore,       Depends(get_session_store)],
-    examples:  Annotated[ExampleStore,       Depends(get_example_store)],
     entities:  Annotated[EntityStore,        Depends(get_entity_store)],
     inv_store: Annotated[InvestigationStore, Depends(get_investigation_store)],
 ) -> StreamingResponse:
     return StreamingResponse(
-        _run_agent(request, llm, store, examples, entities, inv_store),
+        _run_agent(request, llm, store, entities, inv_store),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

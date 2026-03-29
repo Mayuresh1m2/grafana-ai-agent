@@ -8,15 +8,6 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 
-class PlaceholderKey(str, Enum):
-    """Enum of recognised template placeholders.
-    Add new members here to support additional substitutions.
-    """
-    namespace   = "namespace"
-    app         = "app"
-    environment = "environment"
-
-
 class QueryCategory(str, Enum):
     """What the query targets — used to filter examples by domain.
     Add new members here to support additional categories.
@@ -36,12 +27,12 @@ class QueryExample(BaseModel):
     query_type:     str      = Field(..., pattern="^(loki|prometheus)$")
     category:       QueryCategory = Field(default=QueryCategory.service,
                                           description="What the query targets (service, database, infrastructure, …).")
-    template:       str      = Field(..., min_length=1,
-                                     description="Query template with {{placeholder}} tokens.")
+    template:       str       = Field(..., min_length=1,
+                                      description="Query template with {{placeholder}} tokens.")
     tags:           list[str] = Field(default_factory=list)
-    placeholders:   list[PlaceholderKey] = Field(default_factory=list,
-                                                  description="Which placeholders appear in the template.")
-    created_at:     datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    placeholders:   list[str] = Field(default_factory=list,
+                                      description="Placeholder names found in the template (e.g. ['namespace', 'container']).")
+    created_at:     datetime  = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ExampleCreate(BaseModel):
@@ -50,8 +41,8 @@ class ExampleCreate(BaseModel):
     query_type:   str = Field(..., pattern="^(loki|prometheus)$")
     category:     QueryCategory = QueryCategory.service
     template:     str
-    tags:         list[str]         = []
-    placeholders: list[PlaceholderKey] = []
+    tags:         list[str] = []
+    placeholders: list[str] = []
 
 
 class ExampleSearchRequest(BaseModel):

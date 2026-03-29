@@ -31,17 +31,24 @@ export interface ExampleCreate {
   placeholders: string[]
 }
 
-export const PLACEHOLDER_KEYS = ['namespace', 'app', 'environment'] as const
-export type PlaceholderKey = typeof PLACEHOLDER_KEYS[number]
+/** Extract every unique {{key}} placeholder name from a template string. */
+export function detectPlaceholders(template: string): string[] {
+  const matches = [...template.matchAll(/\{\{(\w+)\}\}/g)]
+  return [...new Set(matches.map(m => m[1]))]
+}
 
-export async function fetchExamples(): Promise<QueryExample[]> {
-  const res = await fetch('/api/v1/examples/')
+function _qs(grafana_url: string): string {
+  return grafana_url ? `?grafana_url=${encodeURIComponent(grafana_url)}` : ''
+}
+
+export async function fetchExamples(grafana_url = ''): Promise<QueryExample[]> {
+  const res = await fetch(`/api/v1/examples/${_qs(grafana_url)}`)
   if (!res.ok) throw new Error(`Failed to fetch examples: ${res.status}`)
   return res.json()
 }
 
-export async function createExample(body: ExampleCreate): Promise<QueryExample> {
-  const res = await fetch('/api/v1/examples/', {
+export async function createExample(body: ExampleCreate, grafana_url = ''): Promise<QueryExample> {
+  const res = await fetch(`/api/v1/examples/${_qs(grafana_url)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -50,13 +57,13 @@ export async function createExample(body: ExampleCreate): Promise<QueryExample> 
   return res.json()
 }
 
-export async function deleteExample(id: string): Promise<void> {
-  const res = await fetch(`/api/v1/examples/${id}`, { method: 'DELETE' })
+export async function deleteExample(id: string, grafana_url = ''): Promise<void> {
+  const res = await fetch(`/api/v1/examples/${id}${_qs(grafana_url)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Failed to delete example: ${res.status}`)
 }
 
-export async function searchExamples(query: string, top_k = 3): Promise<QueryExample[]> {
-  const res = await fetch('/api/v1/examples/search', {
+export async function searchExamples(query: string, grafana_url = '', top_k = 3): Promise<QueryExample[]> {
+  const res = await fetch(`/api/v1/examples/search${_qs(grafana_url)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, top_k }),

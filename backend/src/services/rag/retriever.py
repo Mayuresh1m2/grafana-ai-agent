@@ -1,43 +1,55 @@
 """Retrieve and render relevant query examples for the agent system prompt."""
 from __future__ import annotations
 
+import re
 import structlog
 
-from src.models.example import PlaceholderKey, QueryCategory, QueryExample
+from src.models.example import QueryCategory, QueryExample
 from src.services.rag.store import ExampleStore
 
 logger = structlog.get_logger(__name__)
 
-# Maps each PlaceholderKey to where its value lives in the agent context dict
-_PLACEHOLDER_SOURCES: dict[PlaceholderKey, str] = {
-    PlaceholderKey.namespace:   "namespace",
-    PlaceholderKey.app:         "services",      # first entry if comma-separated
-    PlaceholderKey.environment: "environment",
+# Keys whose context name differs from the placeholder name.
+# e.g. {{app}} is filled from context["services"] (first comma-separated entry).
+_CONTEXT_ALIASES: dict[str, str] = {
+    "app": "services",
 }
+
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 def _substitute(template: str, context: dict[str, str]) -> str:
-    """Replace {{key}} tokens in template with values from context."""
-    def resolve(key: PlaceholderKey) -> str:
-        ctx_key = _PLACEHOLDER_SOURCES.get(key, key.value)
-        raw = context.get(ctx_key, "")
-        # If the value is a comma-separated list, take the first item
-        return raw.split(",")[0].strip() if raw else f"{{{{{key.value}}}}}"
+    """Replace every {{key}} token in *template* with the matching context value.
 
-    result = template
-    for key in PlaceholderKey:
-        result = result.replace(f"{{{{{key.value}}}}}", resolve(key))
-    return result
+    Looks up each placeholder name in *context* directly, falling back to
+    ``_CONTEXT_ALIASES`` for keys whose context name differs.  Tokens with no
+    matching context value are left unchanged so the LLM can fill them in.
+    """
+    def resolve(match: re.Match[str]) -> str:
+        key     = match.group(1)
+        ctx_key = _CONTEXT_ALIASES.get(key, key)
+        raw     = context.get(ctx_key, "")
+        # Comma-separated lists (e.g. services) → take the first entry
+        return raw.split(",")[0].strip() if raw else match.group(0)
+
+    return _PLACEHOLDER_RE.sub(resolve, template)
 
 
 def _format_example(example: QueryExample, context: dict[str, str], score: float) -> str:
-    resolved = _substitute(example.template, context)
-    tags = ", ".join(example.tags) if example.tags else "—"
+    resolved  = _substitute(example.template, context)
+    remaining = _PLACEHOLDER_RE.findall(resolved)
+    tags      = ", ".join(example.tags) if example.tags else "—"
+
+    missing_note = (
+        f"# Missing values: {', '.join(remaining)} — ask the user to provide "
+        "these before running the query.\n"
+    ) if remaining else ""
+
     return (
         f"### {example.title} ({example.query_type}, category={example.category.value})\n"
         f"# {example.description}\n"
         f"# Tags: {tags}  |  relevance: {score:.2f}\n"
-        f"{resolved}"
+        f"{missing_note}{resolved}"
     )
 
 

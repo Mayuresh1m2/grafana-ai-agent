@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.models.example import ExampleCreate, ExampleSearchRequest, QueryExample
 from src.services.rag.store import ExampleStore, get_example_store
@@ -12,7 +12,13 @@ from src.services.rag.store import ExampleStore, get_example_store
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
-Dep = Annotated[ExampleStore, Depends(get_example_store)]
+
+def _store_dep(grafana_url: str = Query(default="")) -> ExampleStore:
+    """FastAPI dependency — resolves the ExampleStore for the given Grafana instance."""
+    return get_example_store(grafana_url)
+
+
+Dep = Annotated[ExampleStore, Depends(_store_dep)]
 
 
 @router.post("/", response_model=QueryExample, status_code=201)

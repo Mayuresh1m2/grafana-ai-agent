@@ -4,14 +4,16 @@ import {
   createExample,
   deleteExample,
   fetchExamples,
-  PLACEHOLDER_KEYS,
+  detectPlaceholders,
   QUERY_CATEGORIES,
   CATEGORY_LABELS,
   type ExampleCreate,
-  type PlaceholderKey,
   type QueryCategory,
   type QueryExample,
 } from '@/api/examples'
+import { useSessionStore } from '@/stores/sessionStore'
+
+const session = useSessionStore()
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const examples       = ref<QueryExample[]>([])
@@ -33,10 +35,8 @@ const form = ref<ExampleCreate>({
 })
 const tagsInput = ref('')
 
-// Auto-detect placeholders present in the template
-const detectedPlaceholders = computed<PlaceholderKey[]>(() => {
-  return PLACEHOLDER_KEYS.filter(k => form.value.template.includes(`{{${k}}}`))
-})
+// Auto-detect any {{key}} placeholders present in the template
+const detectedPlaceholders = computed<string[]>(() => detectPlaceholders(form.value.template))
 
 // Filtered list based on selected category tab
 const filteredExamples = computed(() =>
@@ -50,7 +50,7 @@ async function load() {
   loading.value = true
   error.value   = null
   try {
-    examples.value = await fetchExamples()
+    examples.value = await fetchExamples(session.grafanaUrl)
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -66,7 +66,7 @@ async function save() {
   try {
     form.value.tags         = tagsInput.value.split(',').map(t => t.trim()).filter(Boolean)
     form.value.placeholders = detectedPlaceholders.value
-    await createExample(form.value)
+    await createExample(form.value, session.grafanaUrl)
     showForm.value = false
     resetForm()
     await load()
@@ -90,7 +90,7 @@ function resetForm() {
 async function remove(id: string) {
   if (!confirm('Delete this example?')) return
   try {
-    await deleteExample(id)
+    await deleteExample(id, session.grafanaUrl)
     examples.value = examples.value.filter(e => e.id !== id)
   } catch (e) {
     error.value = String(e)
@@ -104,6 +104,7 @@ async function remove(id: string) {
       <div>
         <h1 class="page-title">Query Examples</h1>
         <p class="page-subtitle">Curated LogQL / PromQL templates — retrieved at query time and injected into the agent prompt.</p>
+      <p v-if="session.grafanaUrl" class="page-instance">Instance: <code>{{ session.grafanaUrl }}</code></p>
       </div>
       <button class="btn-primary" @click="showForm = !showForm">
         {{ showForm ? 'Cancel' : '+ Add Example' }}
@@ -232,6 +233,8 @@ async function remove(id: string) {
 }
 .page-title    { font-size: 1.3rem; font-weight: 700; margin: 0 0 0.25rem; }
 .page-subtitle { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
+.page-instance { font-size: 0.78rem; color: var(--text-muted); margin: 0.25rem 0 0; }
+.page-instance code { font-family: var(--font-mono); font-size: 0.78rem; }
 .page-error    { color: var(--status-error); font-size: 0.85rem; }
 
 /* ── Form ── */
