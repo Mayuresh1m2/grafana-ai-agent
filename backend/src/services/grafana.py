@@ -13,6 +13,8 @@ Two authentication modes:
 from __future__ import annotations
 
 import asyncio
+import re
+import time
 from typing import Annotated
 
 import httpx
@@ -25,6 +27,45 @@ from src.services.session_store import GrafanaSession, SessionStore, get_session
 logger = structlog.get_logger(__name__)
 
 _DATASOURCE_PROXY = "/api/datasources/proxy/uid/{uid}"
+
+# ── Time helpers ──────────────────────────────────────────────────────────────
+
+_RELATIVE_RE = re.compile(r"^now(?:-(\d+)([smhd]))?$")
+_UNIT_SECS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _relative_to_epoch(t: str) -> float | None:
+    """Return epoch seconds for a 'now[-Xunit]' string, or None if not relative."""
+    m = _RELATIVE_RE.match(t.strip())
+    if not m:
+        return None
+    offset = int(m.group(1) or 0) * _UNIT_SECS.get(m.group(2) or "s", 0)
+    return time.time() - offset
+
+
+def _to_unix_ns(t: str) -> str:
+    """Convert a relative or absolute time string to nanosecond Unix timestamp.
+
+    Loki's ``/loki/api/v1/query_range`` (and label-values) endpoint requires
+    an integer nanosecond timestamp when accessed through the Grafana proxy —
+    relative strings like 'now-1h' are only accepted by the standalone Loki API.
+    """
+    epoch = _relative_to_epoch(t)
+    if epoch is not None:
+        return str(int(epoch * 1_000_000_000))
+    # Already absolute: pass through (RFC3339 or numeric ns both work)
+    return t
+
+
+def _to_unix_s(t: str) -> str:
+    """Convert a relative or absolute time string to a Unix second timestamp.
+
+    Prometheus range/instant queries need epoch seconds (int or float).
+    """
+    epoch = _relative_to_epoch(t)
+    if epoch is not None:
+        return str(int(epoch))
+    return t
 
 
 def _proxy_path(uid: str, backend_path: str) -> str:
@@ -171,8 +212,8 @@ class GrafanaClient:
 
         params = {
             "query": logql,
-            "start": start,
-            "end": end,
+            "start": _to_unix_ns(start),
+            "end":   _to_unix_ns(end),
             "limit": str(limit),
         }
         resp = await self._http.get(
@@ -193,7 +234,7 @@ class GrafanaClient:
     ) -> list[str]:
         """Return all values for a Loki label proxied through Grafana."""
         uid = datasource_uid or self.require_datasource("loki").uid
-        params: dict[str, str] = {"start": start, "end": end}
+        params: dict[str, str] = {"start": _to_unix_ns(start), "end": _to_unix_ns(end)}
         if selector:
             params["query"] = selector
 
@@ -221,7 +262,7 @@ class GrafanaClient:
 
         params: dict[str, str] = {"query": promql}
         if time:
-            params["time"] = time
+            params["time"] = _to_unix_s(time)
 
         resp = await self._http.get(
             _proxy_path(uid, "/api/v1/query"), params=params
@@ -243,9 +284,9 @@ class GrafanaClient:
         uid = datasource_uid or self.require_datasource("prometheus").uid
         params: dict[str, str] = {
             "query": promql,
-            "start": start,
-            "end": end,
-            "step": step,
+            "start": _to_unix_s(start),
+            "end":   _to_unix_s(end),
+            "step":  step,
         }
         resp = await self._http.get(
             _proxy_path(uid, "/api/v1/query_range"), params=params
