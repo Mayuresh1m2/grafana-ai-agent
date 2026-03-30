@@ -156,25 +156,35 @@ class ExampleStore:
         top_k: int = 3,
         category: QueryCategory | None = None,
     ) -> list[tuple[QueryExample, float]]:
-        self._ensure_collection()
+        try:
+            self._ensure_collection()
+        except Exception as exc:
+            logger.warning("rag_ensure_collection_failed", error=str(exc))
+            return []
+
         if self._count() == 0:
             return []
+
         embedding = await self._embedder.embed(query)
         query_filter = (
             Filter(must=[FieldCondition(key="category", match=MatchValue(value=category.value))])
             if category else None
         )
-        response = self._client.query_points(
-            collection_name=self._collection,
-            query=embedding,
-            limit=top_k,
-            query_filter=query_filter,
-            with_payload=True,
-        )
-        return [
-            (self._from_payload(str(r.id), r.payload or {}), float(r.score))
-            for r in response.points
-        ]
+        try:
+            response = self._client.query_points(
+                collection_name=self._collection,
+                query=embedding,
+                limit=top_k,
+                query_filter=query_filter,
+                with_payload=True,
+            )
+            return [
+                (self._from_payload(str(r.id), r.payload or {}), float(r.score))
+                for r in response.points
+            ]
+        except Exception as exc:
+            logger.warning("rag_search_failed", collection=self._collection, error=str(exc))
+            return []
 
 
 def _url_to_slug(grafana_url: str) -> str:
