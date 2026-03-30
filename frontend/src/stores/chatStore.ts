@@ -139,6 +139,16 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (event.type === 'suggestions') {
       msg.suggestions = event.items
+      return
+    }
+    if (event.type === 'error') {
+      if (msg.thinking) msg.thinking.isDone = true
+      messages.value[idx] = { ...msg, status: 'error', errorMessage: (event as { type: string; message?: string }).message }
+      isStreaming.value    = false
+      _cancelSSE           = null
+      if ((event as { type: string; code?: string }).code === 'session_expired') {
+        sessionExpired.value = true
+      }
     }
   }
 

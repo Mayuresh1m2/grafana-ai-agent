@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Annotated, AsyncIterator
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.api._sse import sse_event as _sse
@@ -160,6 +160,18 @@ async def _run_agent(
                 if client:
                     try:
                         result = await execute_tool(name, args, client)
+                    except HTTPException as exc:
+                        if exc.status_code in (401, 403):
+                            detail = exc.detail if isinstance(exc.detail, dict) else {}
+                            log.warning("agent_tool_auth_error", tool=name, status=exc.status_code)
+                            yield _sse({
+                                "type":    "error",
+                                "code":    detail.get("code", "session_expired"),
+                                "message": detail.get("message", "Grafana session expired — please re-authenticate."),
+                            })
+                            return
+                        result = f"Tool error: {exc.detail}"
+                        log.error("agent_tool_error", tool=name, error=str(exc), exc_info=True)
                     except Exception as exc:
                         result = f"Tool error: {exc}"
                         log.error("agent_tool_error", tool=name, error=str(exc), exc_info=True)
