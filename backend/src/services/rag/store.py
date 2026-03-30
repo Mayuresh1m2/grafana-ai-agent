@@ -86,7 +86,7 @@ class ExampleStore:
             "category":     example.category.value,
             "template":     example.template,
             "tags":         json.dumps(example.tags),
-            "placeholders": json.dumps([p.value for p in example.placeholders]),
+            "placeholders": json.dumps(example.placeholders),
             "created_at":   example.created_at.isoformat(),
         }
 
