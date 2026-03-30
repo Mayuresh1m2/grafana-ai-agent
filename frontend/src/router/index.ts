@@ -27,6 +27,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Service Entities' },
   },
   {
+    path: '/service-graph',
+    name: 'service-graph',
+    component: () => import('@/views/ServiceGraphView.vue'),
+    meta: { title: 'Service Graph' },
+  },
+  {
     // Catch-all 404
     path: '/:pathMatch(.*)*',
     name: 'not-found',

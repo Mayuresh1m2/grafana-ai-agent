@@ -12,6 +12,7 @@ import structlog
 from src.models.entity import resolve_entities
 from src.models.requests import AgentQueryRequest
 from src.models.responses import DatasourceInfo
+from src.models.service_graph import ServiceGraph
 from src.services.entity_store import EntityStore
 from src.services.investigation_store import InvestigationState
 from src.services.rag.retriever import retrieve_examples
@@ -68,6 +69,33 @@ def _investigation_block(state: InvestigationState) -> str:
     return "\n\n" + "\n".join(lines)
 
 
+def _service_graph_block(graph: ServiceGraph) -> str:
+    """Describe the service topology so the agent can reason about call paths."""
+    if not graph.nodes:
+        return ""
+
+    node_map = {n.id: n for n in graph.nodes}
+
+    lines = ["\n\nService topology (use this to trace call paths and understand dependencies):"]
+    for n in graph.nodes:
+        parts = [f"  [{n.node_type.value.upper()}] {n.name}"]
+        if n.tech:
+            parts.append(f"tech={n.tech}")
+        if n.description:
+            parts.append(f"— {n.description}")
+        lines.append(" ".join(parts))
+
+    if graph.edges:
+        lines.append("\nInteractions:")
+        for e in graph.edges:
+            src_name = node_map[e.source].name if e.source in node_map else e.source
+            tgt_name = node_map[e.target].name if e.target in node_map else e.target
+            detail = f" ({e.label})" if e.label else ""
+            lines.append(f"  {src_name} --[{e.edge_type.value}]--> {tgt_name}{detail}")
+
+    return "\n".join(lines)
+
+
 def _entity_block(query: str, entities: EntityStore) -> str:
     matched = resolve_entities(query, entities.list_all())
     if not matched:
@@ -90,6 +118,7 @@ async def build(
     examples:      ExampleStore,
     entities:      EntityStore,
     investigation: InvestigationState | None = None,
+    graph:         ServiceGraph | None = None,
 ) -> tuple[str, int, int]:
     """Return ``(system_prompt, rag_chars, entity_count)`` for the given request.
 
@@ -97,6 +126,11 @@ async def build(
     without duplicating the resolution work.
     """
     prompt = _BASE
+
+    if graph:
+        graph_block = _service_graph_block(graph)
+        if graph_block:
+            prompt += graph_block
 
     if datasources:
         prompt += _datasource_block(datasources)

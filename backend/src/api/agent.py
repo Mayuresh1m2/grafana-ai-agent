@@ -22,6 +22,7 @@ from src.services.llm.base import LLMProvider, parse_suggestions
 from src.services.llm.factory import get_llm_provider
 from src.services.prompt_builder import build as build_prompt
 from src.services.rag.store import get_example_store
+from src.services.service_graph_store import get_service_graph_store
 from src.services.session_store import SessionStore, get_session_store
 
 logger = structlog.get_logger(__name__)
@@ -84,9 +85,12 @@ async def _run_agent(
             log.info("investigation_state_loaded", turn=investigation.turn_count,
                      findings=len(investigation.findings))
 
+    # ── Service graph (topology context) ─────────────────────────────────────
+    graph = get_service_graph_store().load()
+
     # ── System prompt ─────────────────────────────────────────────────────────
     system_prompt, rag_chars, entity_count = await build_prompt(
-        request, datasources, examples, entities, investigation
+        request, datasources, examples, entities, investigation, graph
     )
     if rag_chars:
         log.info("rag_injected", chars=rag_chars)

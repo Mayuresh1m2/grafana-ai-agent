@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # ── SQLite (structured store for entities) ────────────────────────────────
     sqlite_db_path: str = "./data/grafana_ai.db"
 
+    # ── Service graph (topology map) ──────────────────────────────────────────
+    # Override to a path inside your project repo so the graph can be committed.
+    service_graph_path: str = "./data/service_graph.json"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
