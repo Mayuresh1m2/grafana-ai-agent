@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", repr=False)
     anthropic_model: str = "claude-opus-4-6"
 
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+    openai_api_key:   str = Field(default="", repr=False)
+    openai_model:     str = "gpt-4o"
+    openai_base_url:  str = ""   # Override for Azure OpenAI or compatible endpoints
+
     # ── Grafana ──────────────────────────────────────────────────────────────
     grafana_base_url: str = "http://localhost:3000"
     grafana_api_key: str = Field(default="", repr=False)

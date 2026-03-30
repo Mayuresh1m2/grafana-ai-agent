@@ -20,6 +20,9 @@ dependencies = [
     "playwright>=1.43.0",
     "cryptography>=42.0.0",
     "azure-identity>=1.16.0",
+    # LLM providers (lazy-imported — only used when LLM_PROVIDER is set)
+    "anthropic>=0.28.0",
+    "openai>=1.30.0",
 ]
 
 [project.optional-dependencies]
