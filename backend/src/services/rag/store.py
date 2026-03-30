@@ -156,6 +156,7 @@ class ExampleStore:
         top_k: int = 3,
         category: QueryCategory | None = None,
     ) -> list[tuple[QueryExample, float]]:
+        self._ensure_collection()
         if self._count() == 0:
             return []
         embedding = await self._embedder.embed(query)
