@@ -216,6 +216,8 @@ class GrafanaClient:
             "end":   _to_unix_ns(end),
             "limit": str(limit),
         }
+        log.debug("loki_query_params", start_raw=start, end_raw=end,
+                  start_ns=params["start"], end_ns=params["end"])
         resp = await self._http.get(
             _proxy_path(uid, "/loki/api/v1/query_range"), params=params
         )
@@ -264,6 +266,7 @@ class GrafanaClient:
         if time:
             params["time"] = _to_unix_s(time)
 
+        log.debug("prometheus_query_params", time_raw=time, time_s=params.get("time", "(current)"))
         resp = await self._http.get(
             _proxy_path(uid, "/api/v1/query"), params=params
         )
@@ -282,12 +285,15 @@ class GrafanaClient:
     ) -> dict[str, object]:
         """Execute a PromQL range query proxied through Grafana."""
         uid = datasource_uid or self.require_datasource("prometheus").uid
+        log = logger.bind(datasource_uid=uid, promql_preview=promql[:60])
         params: dict[str, str] = {
             "query": promql,
             "start": _to_unix_s(start),
             "end":   _to_unix_s(end),
             "step":  step,
         }
+        log.debug("prometheus_range_query_params", start_raw=start, end_raw=end,
+                  start_s=params["start"], end_s=params["end"], step=step)
         resp = await self._http.get(
             _proxy_path(uid, "/api/v1/query_range"), params=params
         )
