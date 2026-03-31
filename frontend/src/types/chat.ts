@@ -12,7 +12,7 @@ export type SSEEventType =
 export interface SSEThinkingEvent  { type: 'thinking'; chunk: string }
 export interface SSEContentEvent   { type: 'content';  chunk: string }
 export interface SSEDoneEvent      { type: 'done' }
-export interface SSEErrorEvent     { type: 'error'; message: string }
+export interface SSEErrorEvent     { type: 'error'; message: string; code?: string }
 
 export interface SSELogSnippetEvent {
   type: 'log_snippet'

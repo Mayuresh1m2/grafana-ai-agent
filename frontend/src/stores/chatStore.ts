@@ -156,7 +156,9 @@ export const useChatStore = defineStore('chat', () => {
     const msg = messages.value[idx]
     if (msg) {
       if (msg.thinking) msg.thinking.isDone = true
-      messages.value[idx] = { ...msg, status: 'complete' }
+      if (msg.status !== 'error') {
+        messages.value[idx] = { ...msg, status: 'complete' }
+      }
     }
     isStreaming.value = false
     _cancelSSE = null

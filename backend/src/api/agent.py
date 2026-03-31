@@ -194,7 +194,11 @@ async def _run_agent(
 
     except Exception as exc:
         log.error("agent_query_error", error=str(exc), exc_info=True)
-        yield _sse({"type": "error", "message": str(exc)})
+        msg_lower = str(exc).lower()
+        if any(k in msg_lower for k in ("401", "403", "unauthorized", "forbidden", "token", "credential")):
+            yield _sse({"type": "error", "code": "session_expired", "message": str(exc)})
+        else:
+            yield _sse({"type": "error", "message": str(exc)})
     finally:
         if client:
             await client.aclose()
