@@ -11,8 +11,14 @@ logger = structlog.get_logger(__name__)
 
 # Keys whose context name differs from the placeholder name.
 # e.g. {{app}} is filled from context["services"] (first comma-separated entry).
+# Common Kubernetes label placeholders are mapped to setup-page fields so that
+# templates resolve automatically without requiring alert labels each time.
 _CONTEXT_ALIASES: dict[str, str] = {
-    "app": "services",
+    "app":       "services",
+    "service":   "services",
+    "container": "services",
+    "job":       "services",
+    "workload":  "services",
 }
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
