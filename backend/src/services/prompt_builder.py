@@ -36,8 +36,10 @@ def _datasource_block(datasources: list[DatasourceInfo]) -> str:
     )
     return (
         f"\n\nAvailable Grafana datasources (use these UIDs directly in tool calls):\n{lines}\n"
-        "When querying logs use the uid of the datasource with type=loki. "
-        "When querying metrics use the uid of the datasource with type=prometheus."
+        "Rules for datasource selection:\n"
+        "- Logs (query_loki): use the uid where type=loki\n"
+        "- Metrics (query_prometheus / query_prometheus_range): use the uid where type=prometheus\n"
+        "- Never use a tempo, elasticsearch, or other non-prometheus uid for metric queries."
     )
 
 

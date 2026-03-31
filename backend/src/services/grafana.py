@@ -188,6 +188,28 @@ class GrafanaClient:
         default = next((d for d in matches if d.is_default), None)
         return default or matches[0]
 
+    def _resolve_uid(self, datasource_uid: str | None, expected_type: str) -> str:
+        """Return a validated datasource UID for *expected_type*.
+
+        If *datasource_uid* is provided but belongs to a different datasource
+        type (e.g. the LLM passed a Tempo UID for a Prometheus query), fall
+        back to the correct datasource automatically and log a warning.
+        """
+        if datasource_uid:
+            ds = next((d for d in self._session.datasources if d.uid == datasource_uid), None)
+            if ds and ds.type != expected_type:
+                logger.warning(
+                    "datasource_type_mismatch",
+                    provided_uid=datasource_uid,
+                    provided_type=ds.type,
+                    expected_type=expected_type,
+                    action="falling back to correct datasource",
+                )
+                return self.require_datasource(expected_type).uid
+            if ds:
+                return ds.uid
+        return self.require_datasource(expected_type).uid
+
     def require_datasource(self, ds_type: str) -> DatasourceInfo:
         """Like :meth:`find_datasource` but raises ``HTTPException`` when absent."""
         ds = self.find_datasource(ds_type)
@@ -221,7 +243,7 @@ class GrafanaClient:
             datasource_uid: Explicit Grafana datasource UID.  Falls back to
                 the first configured Loki datasource.
         """
-        uid = datasource_uid or self.require_datasource("loki").uid
+        uid = self._resolve_uid(datasource_uid, "loki")
         log = logger.bind(datasource_uid=uid, logql_preview=logql[:60])
         log.debug("loki_query_start")
 
@@ -273,7 +295,7 @@ class GrafanaClient:
         datasource_uid: str | None = None,
     ) -> dict[str, object]:
         """Execute a PromQL instant query proxied through Grafana."""
-        uid = datasource_uid or self.require_datasource("prometheus").uid
+        uid = self._resolve_uid(datasource_uid, "prometheus")
         log = logger.bind(datasource_uid=uid, promql_preview=promql[:60])
         log.debug("prometheus_query_start")
 
@@ -299,7 +321,7 @@ class GrafanaClient:
         datasource_uid: str | None = None,
     ) -> dict[str, object]:
         """Execute a PromQL range query proxied through Grafana."""
-        uid = datasource_uid or self.require_datasource("prometheus").uid
+        uid = self._resolve_uid(datasource_uid, "prometheus")
         log = logger.bind(datasource_uid=uid, promql_preview=promql[:60])
         params: dict[str, str] = {
             "query": promql,
