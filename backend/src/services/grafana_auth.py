@@ -17,12 +17,13 @@ request header to the Grafana API.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from playwright.async_api import (
-    Browser,
     BrowserContext,
     Page,
     TimeoutError as PlaywrightTimeout,
@@ -33,6 +34,19 @@ logger = structlog.get_logger(__name__)
 
 _LOGIN_TIMEOUT_MS = 30_000   # 30 s to navigate + submit credentials
 _SSO_TIMEOUT_MS   = 180_000  # 3 min for the user to complete SSO
+
+# Persistent browser profiles are stored here, one sub-directory per Grafana URL.
+# Each profile retains cookies, localStorage, and session state so users are not
+# forced to re-login after the backend restarts or after browser windows close.
+_PROFILE_BASE = Path("./data/playwright-profiles")
+
+
+def _profile_dir(grafana_url: str) -> Path:
+    """Return (and create) a profile directory specific to *grafana_url*."""
+    slug = re.sub(r"[^\w]", "_", grafana_url.lower()).strip("_")[:60]
+    path = _PROFILE_BASE / slug
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class GrafanaAuthError(Exception):
@@ -47,17 +61,21 @@ async def _browser_page(
     *,
     headless: bool,
 ) -> AsyncIterator[tuple[BrowserContext, Page]]:
-    """Launch a browser, navigate to *grafana_url*, and yield ``(context, page)``.
+    """Launch a persistent-profile browser, navigate to *grafana_url*, and
+    yield ``(context, page)``.
 
-    Converts navigation errors to :exc:`GrafanaAuthError` and ensures the
-    browser is closed on exit, so callers only need to handle post-load logic.
+    Using ``launch_persistent_context`` saves cookies and browser storage to
+    disk, so users only have to log in once per Grafana instance regardless of
+    backend restarts or tool reloads.
     """
+    profile = _profile_dir(grafana_url)
     async with async_playwright() as pw:
-        browser: Browser = await pw.chromium.launch(headless=headless)
+        context: BrowserContext = await pw.chromium.launch_persistent_context(
+            str(profile),
+            headless=headless,
+            ignore_https_errors=True,   # tolerate self-signed TLS certs
+        )
         try:
-            context: BrowserContext = await browser.new_context(
-                ignore_https_errors=True,   # tolerate self-signed TLS certs
-            )
             page: Page = await context.new_page()
             try:
                 await page.goto(
@@ -75,7 +93,7 @@ async def _browser_page(
                 ) from exc
             yield context, page
         finally:
-            await browser.close()
+            await context.close()
 
 
 # ── Auth service ──────────────────────────────────────────────────────────────
