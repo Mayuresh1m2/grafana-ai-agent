@@ -30,17 +30,32 @@ _DATASOURCE_PROXY = "/api/datasources/proxy/uid/{uid}"
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
 
-_RELATIVE_RE = re.compile(r"^now(?:-(\d+)([smhd]))?$")
 _UNIT_SECS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+# Matches: "now", "now-1h", "now-30m", "now-7d", …
+_NOW_RE    = re.compile(r"^now(?:-(\d+)([smhd]))?$")
+# Matches bare offsets the LLM sometimes emits: "-1h", "-30m", "1h", "30m", …
+_OFFSET_RE = re.compile(r"^-?(\d+)([smhd])$")
 
 
 def _relative_to_epoch(t: str) -> float | None:
-    """Return epoch seconds for a 'now[-Xunit]' string, or None if not relative."""
-    m = _RELATIVE_RE.match(t.strip())
-    if not m:
-        return None
-    offset = int(m.group(1) or 0) * _UNIT_SECS.get(m.group(2) or "s", 0)
-    return time.time() - offset
+    """Return epoch seconds for a relative time string, or None if not relative.
+
+    Accepted formats:
+    - ``now``          → current time
+    - ``now-1h``       → 1 hour ago  (standard Grafana/Loki form)
+    - ``-1h`` / ``1h`` → also treated as "1 hour ago" (LLM shorthand)
+    """
+    s = t.strip()
+    m = _NOW_RE.match(s)
+    if m:
+        offset = int(m.group(1) or 0) * _UNIT_SECS.get(m.group(2) or "s", 0)
+        return time.time() - offset
+    m = _OFFSET_RE.match(s)
+    if m:
+        offset = int(m.group(1)) * _UNIT_SECS.get(m.group(2), 0)
+        return time.time() - offset
+    return None
 
 
 def _to_unix_ns(t: str) -> str:
