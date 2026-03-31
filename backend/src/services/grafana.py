@@ -89,23 +89,7 @@ def _proxy_path(uid: str, backend_path: str) -> str:
 
 
 def _raise_for_status(resp: httpx.Response) -> None:
-    """Like resp.raise_for_status() but converts 401/403 to a structured 401.
-
-    A 401 from Grafana means the session cookie has expired.  We raise an
-    HTTPException with ``code="session_expired"`` so the frontend can prompt
-    the user to re-paste their cookie rather than showing a generic error.
-    """
-    if resp.status_code in (401, 403):
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "session_expired",
-                "message": (
-                    "Grafana session has expired. "
-                    "Please re-authenticate via POST /api/v1/grafana/refresh."
-                ),
-            },
-        )
+    """Raise for non-2xx responses (401/403 already handled by the client hook)."""
     resp.raise_for_status()
 
 
@@ -123,7 +107,27 @@ class GrafanaClient:
             headers={**auth_header, "Accept": "application/json"},
             verify=False,  # noqa: S501 — same tolerance as browser login
             timeout=60.0,
+            event_hooks={"response": [self._auth_hook]},
         )
+
+    @staticmethod
+    async def _auth_hook(response: httpx.Response) -> None:
+        """Raise a structured HTTPException for every 401/403 Grafana response.
+
+        Applied as an httpx event hook so every request through this client is
+        covered automatically — no per-method _raise_for_status() call needed.
+        """
+        if response.status_code in (401, 403):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "session_expired",
+                    "message": (
+                        "Grafana session has expired. "
+                        "Please re-authenticate via the banner."
+                    ),
+                },
+            )
 
     @classmethod
     async def create(cls, session: GrafanaSession) -> "GrafanaClient":
