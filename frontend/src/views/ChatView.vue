@@ -54,19 +54,21 @@ function alertsContext(): string {
 }
 
 function sessionPayload() {
-  // Flatten labels from the first firing alert so {{container}}, {{pod}}, {{job}} etc.
-  // get substituted in RAG templates without the user having to provide them manually.
+  // Alert labels (container, pod, job, …) are flattened into context so that
+  // RAG template placeholders like {{namespace}}, {{container}} are substituted
+  // automatically without the user having to provide them manually.
   const alertLabels: Record<string, string> = session.alerts[0]?.labels ?? {}
 
   return {
-    session_id:    session.sessionId,
-    grafana_url:   session.grafanaUrl,
-    namespace:     session.namespace,
-    environment:   session.environment,
-    services:      session.services,
-    repo_path:     session.repoPath,
-    active_alerts: alertsContext(),
-    ...alertLabels,
+    session_id: session.sessionId,
+    context: {
+      namespace:     session.namespace,
+      environment:   session.environment,
+      services:      session.services.join(','),
+      repo_path:     session.repoPath,
+      active_alerts: alertsContext(),
+      ...alertLabels,
+    } satisfies Record<string, string>,
   }
 }
 

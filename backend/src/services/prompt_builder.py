@@ -106,8 +106,8 @@ def _entity_block(query: str, entities: EntityStore) -> str:
         for e in matched
     ]
     return (
-        "\n\nResolved entities from your query "
-        "(use these exact names and namespaces in tool calls):\n"
+        "\n\nResolved entities mentioned in the query (for context only — "
+        "use the query examples above for the correct label selectors):\n"
         + "\n".join(lines)
     )
 
