@@ -55,56 +55,74 @@ async def _run_agent(
 
     client: GrafanaClient | None = None
     datasources = None
-    if session:
-        client = await GrafanaClient.create(session)
-        datasources = client.get_datasources()
-        log.info("agent_datasources_injected", datasources=[f"{d.name}({d.type})" for d in datasources])
-
-    # ── Tool availability ─────────────────────────────────────────────────────
-    tools = get_tools() if client else None
-
-    if tools:
-        tool_names = [t["function"]["name"] for t in tools]
-        log.info("agent_tools_enabled", tools=tool_names)
-        yield _sse({"type": "thinking", "chunk": f"Grafana tools available: {', '.join(tool_names)}\n"})
-    else:
-        if not request.session_id:
-            reason = "no session_id in request — complete the setup flow first"
-        elif session is None:
-            reason = f"session '{request.session_id}' not found — reconnect to Grafana (backend may have restarted)"
-        else:
-            reason = "Grafana client could not be created"
-        log.warning("agent_tools_disabled", reason=reason)
-        yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
-
-    # ── Investigation state (prior turns) ────────────────────────────────────
-    investigation = None
-    if request.session_id:
-        investigation = await inv_store.get(request.session_id)
-        if investigation and investigation.turn_count > 0:
-            log.info("investigation_state_loaded", turn=investigation.turn_count,
-                     findings=len(investigation.findings))
-
-    # ── Service graph (topology context) ─────────────────────────────────────
-    graph = get_service_graph_store().load()
-
-    # ── System prompt ─────────────────────────────────────────────────────────
-    system_prompt, rag_chars, entity_count = await build_prompt(
-        request, datasources, examples, entities, investigation, graph
-    )
-    if rag_chars:
-        log.info("rag_injected", chars=rag_chars)
-    if entity_count:
-        log.info("entity_resolution_injected", count=entity_count)
-
-    messages: list[dict] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": request.query},
-    ]
+    tools: list[dict] | None = None
     final_answer = ""   # captured for investigation state update
 
     # ── Agentic tool loop ─────────────────────────────────────────────────────
     try:
+        if session:
+            try:
+                client = await GrafanaClient.create(session)
+            except Exception as exc:
+                log.error("agent_grafana_client_error", error=str(exc), exc_info=True)
+                exc_lower = str(exc).lower()
+                if any(k in exc_lower for k in ("401", "403", "unauthorized", "forbidden", "token", "credential")):
+                    yield _sse({"type": "error", "code": "session_expired", "message": str(exc)})
+                else:
+                    yield _sse({"type": "error", "message": f"Failed to connect to Grafana: {exc}"})
+                return
+            datasources = client.get_datasources()
+            log.info("agent_datasources_injected", datasources=[f"{d.name}({d.type})" for d in datasources])
+
+        # ── Tool availability ─────────────────────────────────────────────────
+        tools = get_tools() if client else None
+
+        if tools:
+            tool_names = [t["function"]["name"] for t in tools]
+            log.info("agent_tools_enabled", tools=tool_names)
+            yield _sse({"type": "thinking", "chunk": f"Grafana tools available: {', '.join(tool_names)}\n"})
+        elif request.session_id and session is None:
+            # Session was lost (backend restart) — tell the frontend to re-auth
+            log.warning("agent_session_not_found", session_id=request.session_id)
+            yield _sse({
+                "type":    "error",
+                "code":    "session_expired",
+                "message": "Grafana session not found — please re-authenticate.",
+            })
+            return
+        else:
+            reason = (
+                "no session_id in request — complete the setup flow first"
+                if not request.session_id
+                else "Grafana client could not be created"
+            )
+            log.warning("agent_tools_disabled", reason=reason)
+            yield _sse({"type": "thinking", "chunk": f"⚠ Grafana tools unavailable: {reason}\n"})
+
+        # ── Investigation state (prior turns) ──────────────────────────────────
+        investigation = None
+        if request.session_id:
+            investigation = await inv_store.get(request.session_id)
+            if investigation and investigation.turn_count > 0:
+                log.info("investigation_state_loaded", turn=investigation.turn_count,
+                         findings=len(investigation.findings))
+
+        # ── Service graph (topology context) ───────────────────────────────────
+        graph = get_service_graph_store().load()
+
+        # ── System prompt ──────────────────────────────────────────────────────
+        system_prompt, rag_chars, entity_count = await build_prompt(
+            request, datasources, examples, entities, investigation, graph
+        )
+        if rag_chars:
+            log.info("rag_injected", chars=rag_chars)
+        if entity_count:
+            log.info("entity_resolution_injected", count=entity_count)
+
+        messages: list[dict] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": request.query},
+        ]
         for round_num in range(_MAX_TOOL_ROUNDS):
             log.info("agent_llm_call", round=round_num, message_count=len(messages))
 

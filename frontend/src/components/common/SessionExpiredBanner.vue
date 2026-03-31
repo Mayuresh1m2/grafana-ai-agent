@@ -1,26 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/sessionStore'
-import { reauthSsoBrowser } from '@/api/session'
 
-const emit = defineEmits<{ (e: 'refreshed'): void }>()
+const session = useSessionStore()
+const router  = useRouter()
 
-const session    = useSessionStore()
-const refreshing = ref(false)
-const error      = ref<string | null>(null)
-
-async function reauth() {
-  if (!session.sessionId) return
-  error.value    = null
-  refreshing.value = true
-  try {
-    await reauthSsoBrowser(session.sessionId)
-    emit('refreshed')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    refreshing.value = false
-  }
+function reconnect() {
+  // Return to the Authenticate step so the user can log in again with any method
+  session.goToStep(2)
+  router.push('/setup')
 }
 </script>
 
@@ -28,11 +16,10 @@ async function reauth() {
   <div class="expired-banner">
     <span class="expired-banner__icon" aria-hidden="true">⚠</span>
     <span class="expired-banner__msg">
-      {{ refreshing ? 'Browser window opened — complete your Microsoft SSO login to continue.' : 'Grafana session expired.' }}
+      Grafana session expired or was lost. Please re-authenticate to continue.
     </span>
-    <p v-if="error" class="expired-banner__error">{{ error }}</p>
-    <button class="btn-primary btn--sm" :disabled="refreshing" @click="reauth">
-      {{ refreshing ? 'Waiting for login…' : 'Re-authenticate' }}
+    <button class="btn-primary btn--sm" @click="reconnect">
+      Reconnect to Grafana
     </button>
   </div>
 </template>
