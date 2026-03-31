@@ -143,7 +143,11 @@ async def _query_loki(args: dict[str, Any], client: "GrafanaClient") -> str:
     "type": "function",
     "function": {
         "name": "query_prometheus",
-        "description": "Run a PromQL instant query against Prometheus via the Grafana datasource proxy.",
+        "description": (
+            "Run a PromQL instant query against Prometheus via the Grafana datasource proxy. "
+            "Use for current / point-in-time metric values. "
+            "For trends over a time window use query_prometheus_range instead."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -155,6 +159,13 @@ async def _query_loki(args: dict[str, Any], client: "GrafanaClient") -> str:
                     "type": "string",
                     "description": "UID of the Prometheus datasource (from the datasource list in your context). Required.",
                 },
+                "time": {
+                    "type": "string",
+                    "description": (
+                        "Evaluation timestamp as a relative string (e.g. 'now-30m') or Unix seconds. "
+                        "Defaults to now when omitted."
+                    ),
+                },
             },
             "required": ["promql", "datasource_uid"],
         },
@@ -163,8 +174,9 @@ async def _query_loki(args: dict[str, Any], client: "GrafanaClient") -> str:
 async def _query_prometheus(args: dict[str, Any], client: "GrafanaClient") -> str:
     promql         = str(args["promql"])
     datasource_uid = args.get("datasource_uid") or None
+    time_param     = args.get("time") or None
 
-    result  = await client.query_prometheus(promql, datasource_uid=datasource_uid)
+    result  = await client.query_prometheus(promql, time=time_param, datasource_uid=datasource_uid)
     results = (result.get("data") or {}).get("result", [])
     if not results:
         return "No data found for this PromQL query."
@@ -175,4 +187,70 @@ async def _query_prometheus(args: dict[str, Any], client: "GrafanaClient") -> st
         value     = (r.get("value") or [None, None])[1]
         label_str = ", ".join(f'{k}="{v}"' for k, v in metric.items())
         lines.append(f"{label_str}: {value}")
+    return "\n".join(lines)
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "query_prometheus_range",
+        "description": (
+            "Run a PromQL range query against Prometheus via the Grafana datasource proxy. "
+            "Use this to fetch metric trends over a time window (e.g. last hour of CPU usage, "
+            "request rate over the past 30 minutes)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "promql": {
+                    "type": "string",
+                    "description": "PromQL expression, e.g. 'rate(http_requests_total{job=\"checkout\"}[5m])'",
+                },
+                "datasource_uid": {
+                    "type": "string",
+                    "description": "UID of the Prometheus datasource. Required.",
+                },
+                "start": {
+                    "type": "string",
+                    "description": "Range start as a relative string (e.g. 'now-1h') or Unix seconds. Default: now-1h.",
+                },
+                "end": {
+                    "type": "string",
+                    "description": "Range end as a relative string (e.g. 'now') or Unix seconds. Default: now.",
+                },
+                "step": {
+                    "type": "string",
+                    "description": "Resolution step, e.g. '60s', '5m'. Default: 60s.",
+                },
+            },
+            "required": ["promql", "datasource_uid"],
+        },
+    },
+})
+async def _query_prometheus_range(args: dict[str, Any], client: "GrafanaClient") -> str:
+    promql         = str(args["promql"])
+    datasource_uid = args.get("datasource_uid") or None
+    start          = str(args.get("start", "now-1h"))
+    end            = str(args.get("end", "now"))
+    step           = str(args.get("step", "60s"))
+
+    result  = await client.query_prometheus_range(
+        promql, start=start, end=end, step=step, datasource_uid=datasource_uid
+    )
+    results = (result.get("data") or {}).get("result", [])
+    if not results:
+        return "No data found for this PromQL range query."
+
+    lines: list[str] = []
+    for r in results[:5]:          # cap series returned to avoid flooding context
+        metric    = r.get("metric", {})
+        values    = r.get("values") or []
+        label_str = ", ".join(f'{k}="{v}"' for k, v in metric.items()) or "(no labels)"
+        # Summarise: first, last, and min/max values
+        nums = [float(v) for _, v in values if v is not None]
+        if nums:
+            summary = f"min={min(nums):.3g} max={max(nums):.3g} last={nums[-1]:.3g} ({len(nums)} points)"
+        else:
+            summary = "(no values)"
+        lines.append(f"{label_str}: {summary}")
     return "\n".join(lines)
